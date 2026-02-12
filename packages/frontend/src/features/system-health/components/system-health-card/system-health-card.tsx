@@ -9,7 +9,8 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { Badge } from '@/shared/components/ui/badge';
-import { CheckCircle2, XCircle, AlertCircle, Activity, Database, Zap, Globe, Server } from 'lucide-react';
+import { Button } from '@/shared/components/ui/button';
+import { CheckCircle2, XCircle, AlertCircle, Activity, Database, Zap, Globe, Server, Eye, EyeOff } from 'lucide-react';
 import { useSystemHealth } from '@/infrastructure/api/hooks/use-system-health';
 import { LoadingSpinner } from '@/shared/components';
 import type { SystemStatus, ServiceStatus } from '@/infrastructure/api/services/health.service';
@@ -75,9 +76,15 @@ function getLatencyColor(latency?: number): string {
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
+/** Placeholder shown when URL is hidden */
+const MASKED_PLACEHOLDER = '••••••••••••••••••••';
+
 export function SystemHealthCard() {
   const { data: health, isLoading, error } = useSystemHealth();
   const [frontendUrl, setFrontendUrl] = useState<string>('');
+  const [showFrontendUrl, setShowFrontendUrl] = useState(false);
+  const [showBackendUrl, setShowBackendUrl] = useState(false);
+
   useEffect(() => {
     if (typeof window !== 'undefined') setFrontendUrl(window.location.origin);
   }, []);
@@ -157,35 +164,69 @@ export function SystemHealthCard() {
         <div className="space-y-3 pt-2 border-t">
           <h4 className="text-sm font-semibold">Service Status</h4>
 
-          {/* Frontend URL - accessible when user is viewing the app */}
+          {/* Frontend Network - hidden by default, reveal via icon */}
           <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
-            <div className="flex items-center gap-3">
-              <Globe className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm font-medium">Frontend</p>
-                <p className="text-xs text-muted-foreground font-mono break-all">
-                  {frontendUrl || '—'}
-                </p>
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Globe className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Frontend Network</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs text-muted-foreground font-mono break-all">
+                    {showFrontendUrl ? (frontendUrl || '—') : MASKED_PLACEHOLDER}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 -my-0.5"
+                    onClick={() => setShowFrontendUrl(prev => !prev)}
+                    title={showFrontendUrl ? 'Hide URL' : 'Reveal URL'}
+                    aria-label={showFrontendUrl ? 'Hide frontend URL' : 'Reveal frontend URL'}
+                  >
+                    {showFrontendUrl ? (
+                      <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 text-green-600">
+            <div className="flex items-center gap-1.5 text-green-600 shrink-0 ml-2">
               <CheckCircle2 className="h-4 w-4" />
               <span className="text-xs font-medium">Healthy</span>
             </div>
           </div>
 
-          {/* Backend URL - accessible when health API responded */}
+          {/* Backend Network - hidden by default, reveal via icon */}
           <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
-            <div className="flex items-center gap-3">
-              <Server className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm font-medium">Backend</p>
-                <p className="text-xs text-muted-foreground font-mono break-all">
-                  {BACKEND_URL}
-                </p>
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Server className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Backend Network</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs text-muted-foreground font-mono break-all">
+                    {showBackendUrl ? BACKEND_URL : MASKED_PLACEHOLDER}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0 -my-0.5"
+                    onClick={() => setShowBackendUrl(prev => !prev)}
+                    title={showBackendUrl ? 'Hide URL' : 'Reveal URL'}
+                    aria-label={showBackendUrl ? 'Hide backend URL' : 'Reveal backend URL'}
+                  >
+                    {showBackendUrl ? (
+                      <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 text-green-600">
+            <div className="flex items-center gap-1.5 text-green-600 shrink-0 ml-2">
               <CheckCircle2 className="h-4 w-4" />
               <span className="text-xs font-medium">Healthy</span>
             </div>

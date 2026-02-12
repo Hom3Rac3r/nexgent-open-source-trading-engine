@@ -22,6 +22,7 @@ import { Input } from '@/shared/components/ui/input';
 import { Label } from '@/shared/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select';
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/shared/components/ui/pagination';
+import { Badge } from '@/shared/components/ui/badge';
 import { Filter, Download, Loader2 } from 'lucide-react';
 import { useTransactions } from '@/features/transactions';
 import { useCurrency } from '@/shared/contexts/currency.context';
@@ -651,11 +652,23 @@ function TransactionCard({
             </div>
           </div>
         </div>
-        {transaction.signalId && (
-          <div className="text-xs bg-muted px-2 py-1 rounded shrink-0 ml-2">
-            Signal #{transaction.signalId}
-          </div>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0 ml-2 flex-wrap justify-end">
+          {transaction.isDca && (
+            <Badge variant="secondary" className="text-xs font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30">
+              DCA
+            </Badge>
+          )}
+          {transaction.isTakeProfit && (
+            <Badge variant="secondary" className="text-xs font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+              Take profit
+            </Badge>
+          )}
+          {transaction.signalId && (
+            <span className="text-xs bg-muted px-2 py-1 rounded">
+              Signal #{transaction.signalId}
+            </span>
+          )}
+        </div>
       </div>
 
       {transaction.transactionType === 'SWAP' ? (
@@ -792,15 +805,25 @@ function TransactionRow({
           <div className="font-medium truncate">
             {getTransactionDetails()}
           </div>
-          <div className="text-sm text-muted-foreground">
+          <div className="text-sm text-muted-foreground flex flex-wrap items-center gap-1.5">
             {formatTransactionDate(transaction.transactionTime)}
+            {transaction.isDca && (
+              <Badge variant="secondary" className="text-xs font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30">
+                DCA
+              </Badge>
+            )}
+            {transaction.isTakeProfit && (
+              <Badge variant="secondary" className="text-xs font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+                Take profit
+              </Badge>
+            )}
             {transaction.signalId && (
-              <span className="ml-2 text-xs bg-muted px-1.5 py-0.5 rounded-md">
+              <span className="text-xs bg-muted px-1.5 py-0.5 rounded-md">
                 Signal #{transaction.signalId}
               </span>
             )}
             {transaction.transactionType === 'SWAP' && transaction.routes && (transaction.routes as any)?.routePlan && (transaction.routes as any).routePlan.length > 1 && (
-              <span className="ml-2 text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-md">
+              <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-md">
                 {(transaction.routes as any).routePlan.length} steps
               </span>
             )}

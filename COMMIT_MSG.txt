@@ -1,0 +1,26 @@
+feat(frontend): General UX, WebSocket reliability, position detail & transactions
+
+General page (System Health)
+- Hide frontend/backend URLs by default with reveal (eye) icon
+- Label as "Frontend Network" and "Backend Network"
+- Place reveal icon inline next to URL text
+
+WebSocket (use-websocket)
+- Fix agent switch: reconnection was blocked by stale isConnected/isConnecting
+  and wsRef not cleared on close; use readyState and clear wsRef in onclose
+- Fix live data drop-off: connect() guard now uses ref-based readyState check
+  so auto-reconnect runs after unexpected disconnect
+
+Live positions & position detail dialog
+- Derive selectedPosition from live positions by ID so dialog always has
+  up-to-date data (DCA/TP IDs, prices) instead of a stale snapshot
+- Position detail: only reset purchase tab when opening a different position
+  (position?.id), not on every price-update re-render
+- Position detail: fetch DCA and take-profit transactions via API using
+  signalId + isDca/isTakeProfit instead of dcaTransactionIds/takeProfitTransactionIds
+  from WebSocket (avoids empty arrays from pipeline)
+- Position detail: show "Failed to load" + Retry when transaction queries error
+
+Transactions page
+- Show DCA and Take profit badges on transaction cards and table rows
+- Keep Signal # display; adjust layout for badges (flex wrap, gap)
