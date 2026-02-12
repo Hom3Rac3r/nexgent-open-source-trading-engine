@@ -511,8 +511,17 @@ export function useWebSocket(
       return;
     }
 
-    if (isConnecting || isConnected || wsRef.current) {
+    // Use ref-based readyState check instead of isConnected/isConnecting state.
+    // State values can be stale in closures (e.g. when called from setTimeout after agent switch),
+    // whereas wsRef.current.readyState always reflects the true WebSocket state.
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      log('[WebSocket] ⚠️ Connection already active, skipping connect');
       return;
+    }
+
+    // Clean up any stale reference to a closed/closing WebSocket
+    if (wsRef.current) {
+      wsRef.current = null;
     }
 
     setIsConnecting(true);
@@ -538,6 +547,11 @@ export function useWebSocket(
 
       ws.onclose = (event) => {
         log('[WebSocket] ❌ Connection closed:', event.code, event.reason || 'No reason');
+
+        // Clear the ref immediately so the connect() guard won't be blocked by a stale
+        // reference to this closed socket — this is critical for auto-reconnect to work.
+        wsRef.current = null;
+
         setIsConnected(false);
         setIsConnecting(false);
 
@@ -701,9 +715,12 @@ export function useWebSocket(
       // Update refs
       lastAgentIdRef.current = currentAgentId;
       lastTokenRef.current = currentToken;
-      // Wait a bit before reconnecting
+      // Wait a bit before reconnecting with the new agent
       setTimeout(() => {
-        if (!wsRef.current && !isConnected && !isConnecting) {
+        // Use ref-based check — state values (isConnected/isConnecting) are stale in this closure
+        if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+          // Reset the manual disconnect flag so future onclose events can auto-reconnect
+          isManualDisconnect.current = false;
           log('[WebSocket] 🔌 Reconnecting with new agent/token...');
           connect();
         }

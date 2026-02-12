@@ -7,8 +7,7 @@
  * and purchase transaction information.
  */
 
-import { useState, useEffect, useMemo } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/shared/components/ui/button';
 import {
   Dialog,
@@ -21,8 +20,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/shared/components/ui
 import { Copy, X, ExternalLink, Target, Moon } from 'lucide-react';
 import { Badge } from '@/shared/components/ui/badge';
 import { Progress } from '@/shared/components/ui/progress';
-import { useTransaction } from '@/features/transactions';
-import { AgentTransactionsService } from '@/infrastructure/api/services/agent-transactions.service';
+import { useTransaction, useTransactions } from '@/features/transactions';
 import type { TransactionRoutes, RoutePlanStep } from '@/features/transactions/types/transaction.types';
 import { formatLocalTime, formatPrice, formatCurrency } from '@/shared/utils/formatting';
 import type { AgentTransaction } from '@/shared/types/api.types';
@@ -467,55 +465,40 @@ export function PositionDetailDialog({
 }: PositionDetailDialogProps) {
   const [purchaseTab, setPurchaseTab] = useState<'original' | 'dca' | 'takeprofit'>('original');
 
+  // Track position ID to reset tab only when switching to a different position
+  const prevPositionIdRef = useRef<string | null>(null);
+
   // Fetch purchase transaction details
   const purchaseTransactionId = position?.purchaseTransactionId;
   const { data: purchaseTransaction, isLoading: isLoadingTransaction } = useTransaction(
     purchaseTransactionId || undefined
   );
 
-  // Fetch DCA transactions using useQueries (ensure arrays; can be non-array from WebSocket/API)
-  const dcaTransactionIds = Array.isArray(position?.dcaTransactionIds) ? position.dcaTransactionIds : [];
-  const takeProfitTransactionIds = Array.isArray(position?.takeProfitTransactionIds) ? position.takeProfitTransactionIds : [];
-  const agentTransactionsService = useMemo(() => new AgentTransactionsService(), []);
+  // Use the purchase transaction's signalId to query DCA and take-profit transactions directly
+  // from the API. This is more reliable than depending on dcaTransactionIds/takeProfitTransactionIds
+  // arrays from the WebSocket position, which can be stale or empty.
+  const signalId = purchaseTransaction?.signalId;
+  const agentId = position?.agentId;
 
-  const dcaTransactionsQueries = useQueries({
-    queries: dcaTransactionIds.map((id) => ({
-      queryKey: ['agent-transactions', id],
-      queryFn: () => agentTransactionsService.getAgentTransaction(id),
-      enabled: !!id,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 10 * 60 * 1000,
-      refetchOnWindowFocus: false,
-    })),
-  });
-
-  // Fetch Take-Profit transactions using useQueries
-  const takeProfitTransactionsQueries = useQueries({
-    queries: takeProfitTransactionIds.map((id) => ({
-      queryKey: ['agent-transactions', id],
-      queryFn: () => agentTransactionsService.getAgentTransaction(id),
-      enabled: !!id,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 10 * 60 * 1000,
-      refetchOnWindowFocus: false,
-    })),
-  });
-
-  const dcaTransactions = useMemo(
-    () => dcaTransactionsQueries
-      .map((query) => query.data)
-      .filter((tx): tx is AgentTransaction => tx !== undefined),
-    [dcaTransactionsQueries]
+  const {
+    data: dcaTransactions = [],
+    isLoading: isLoadingDCAs,
+    isError: hasDcaErrors,
+    refetch: refetchDcaTransactions,
+  } = useTransactions(
+    { agentId: agentId || '', signalId: signalId ?? undefined, isDca: true },
+    { enabled: !!agentId && signalId != null }
   );
-  const isLoadingDCAs = dcaTransactionsQueries.some((query) => query.isLoading);
 
-  const takeProfitTransactions = useMemo(
-    () => takeProfitTransactionsQueries
-      .map((query) => query.data)
-      .filter((tx): tx is AgentTransaction => tx !== undefined),
-    [takeProfitTransactionsQueries]
+  const {
+    data: takeProfitTransactions = [],
+    isLoading: isLoadingTakeProfits,
+    isError: hasTakeProfitErrors,
+    refetch: refetchTakeProfitTransactions,
+  } = useTransactions(
+    { agentId: agentId || '', signalId: signalId ?? undefined, isTakeProfit: true },
+    { enabled: !!agentId && signalId != null }
   );
-  const isLoadingTakeProfits = takeProfitTransactionsQueries.some((query) => query.isLoading);
 
   // Agent trading config for total take-profit levels (custom vs preset)
   const { data: tradingConfig } = useAgentTradingConfig(position?.agentId);
@@ -566,12 +549,15 @@ export function PositionDetailDialog({
     };
   }, [position, takeProfitTransactions, tradingConfig]);
 
-  // Reset to original tab when dialog opens with new position
+  // Reset to original tab only when the dialog opens for a DIFFERENT position.
+  // Using a ref comparison avoids resetting on every price-update re-render.
   useEffect(() => {
-    if (position && isOpen) {
+    const currentId = position?.id ?? null;
+    if (isOpen && currentId && currentId !== prevPositionIdRef.current) {
       setPurchaseTab('original');
     }
-  }, [position, isOpen]);
+    prevPositionIdRef.current = currentId;
+  }, [position?.id, isOpen]);
 
   if (!position) {
     return null;
@@ -831,6 +817,19 @@ export function PositionDetailDialog({
                   <div className="text-center py-8">
                     <LoadingSpinner size="sm" text="Loading DCA transactions..." />
                   </div>
+                ) : dcaTransactions.length === 0 && hasDcaErrors ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Failed to load DCA transactions.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => refetchDcaTransactions()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
                 ) : dcaTransactions.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     No DCA purchases found for this position
@@ -859,6 +858,19 @@ export function PositionDetailDialog({
                   {isLoadingTakeProfits ? (
                     <div className="text-center py-8">
                       <LoadingSpinner size="sm" text="Loading take-profit transactions..." />
+                    </div>
+                  ) : takeProfitTransactions.length === 0 && hasTakeProfitErrors ? (
+                    <div className="text-center py-8 space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Failed to load take-profit transactions.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetchTakeProfitTransactions()}
+                      >
+                        Retry
+                      </Button>
                     </div>
                   ) : takeProfitTransactions.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">

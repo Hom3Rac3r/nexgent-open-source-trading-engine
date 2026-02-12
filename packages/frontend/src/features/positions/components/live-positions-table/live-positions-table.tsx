@@ -194,11 +194,18 @@ function LivePositionsTableComponent({
   const showInsufficientBalanceFullScreen = hasInsufficientBalance && !hasPositions;
   const showInsufficientBalanceWarning = hasInsufficientBalance && hasPositions;
   const shouldShowWebSocketStatus = !hasNoWallet && !showInsufficientBalanceFullScreen; // Show WebSocket status if wallet exists and not showing full insufficient balance screen
-  const [selectedPosition, setSelectedPosition] = useState<LivePosition | null>(null);
+  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [closePositionDialogOpen, setClosePositionDialogOpen] = useState(false);
   const [positionToClose, setPositionToClose] = useState<LivePosition | null>(null);
   const { closePosition, isClosing: isClosingPosition } = useClosePosition();
+
+  // Derive selectedPosition from the live positions array so it stays in sync
+  // with WebSocket updates (DCA, take-profit, price changes, etc.)
+  const selectedPosition = useMemo(
+    () => (selectedPositionId ? positions.find(p => p.id === selectedPositionId) ?? null : null),
+    [positions, selectedPositionId]
+  );
 
   // Animation tracking for price updates
   const previousPricesRef = useRef<Record<string, number>>({});
@@ -261,7 +268,7 @@ function LivePositionsTableComponent({
   }, [positions, startPositionAnimation]);
 
   const handlePositionClick = useCallback((position: LivePosition) => {
-    setSelectedPosition(position);
+    setSelectedPositionId(position.id);
     setIsDetailsDialogOpen(true);
   }, []);
 
@@ -281,16 +288,16 @@ function LivePositionsTableComponent({
       setPositionToClose(null);
 
       // Close details dialog if it's open for the same position
-      if (selectedPosition?.id === positionToClose.id) {
+      if (selectedPositionId === positionToClose.id) {
         setIsDetailsDialogOpen(false);
-        setSelectedPosition(null);
+        setSelectedPositionId(null);
       }
 
       // WebSocket will automatically update the positions list
     } catch (error) {
       // Error is already handled by the hook
     }
-  }, [positionToClose, selectedAgentId, selectedPosition, closePosition]);
+  }, [positionToClose, selectedAgentId, selectedPositionId, closePosition]);
 
   if (!selectedAgentId) {
     return (
