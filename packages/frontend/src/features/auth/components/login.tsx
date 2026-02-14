@@ -4,7 +4,7 @@
  * Login component
  * 
  * Main login page component with email/password authentication.
- * Includes logo, form, and sign-up link.
+ * Registration is disabled — the admin account is seeded from env vars.
  * 
  * @example
  * ```tsx
@@ -25,7 +25,6 @@ import { theme } from '@/shared/config/theme.config';
  * Displays the login page with:
  * - Brand logo
  * - Email/password login form
- * - Sign up link
  * 
  * All styling uses theme variables for easy customization.
  * 
@@ -73,32 +72,25 @@ export function Login() {
             className="text-center"
             style={{ color: theme.colors.text.secondary }}
           >
-            Enter your credentials to continue
+            Use the admin credentials you configured in your{' '}
+            <code
+              className="text-xs px-1 py-0.5 rounded"
+              style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}
+            >
+              ADMIN_EMAIL
+            </code>{' '}
+            and{' '}
+            <code
+              className="text-xs px-1 py-0.5 rounded"
+              style={{ backgroundColor: 'rgba(255,255,255,0.1)' }}
+            >
+              ADMIN_PASSWORD
+            </code>{' '}
+            environment variables.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <LoginForm />
-
-          <div className="mt-6">
-            <div
-              className="border-t mb-4"
-              style={{ borderColor: theme.colors.border.default }}
-            ></div>
-
-            <p
-              className="text-sm text-center"
-              style={{ color: theme.colors.text.secondary }}
-            >
-              Don't have an account?{' '}
-              <Link
-                href="/register"
-                className="hover:underline font-medium"
-                style={{ color: theme.colors.accent.primary }}
-              >
-                Sign up
-              </Link>
-            </p>
-          </div>
         </CardContent>
       </Card>
     </div>

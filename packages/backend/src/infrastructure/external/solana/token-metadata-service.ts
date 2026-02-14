@@ -5,6 +5,7 @@
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
+import logger from '@/infrastructure/logging/logger.js';
 
 /**
  * Token Metadata Service Error
@@ -39,6 +40,8 @@ class TokenMetadataService {
   private connection: Connection | null = null;
   private readonly SOL_DECIMALS = 9;
   private readonly SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+  private readonly MAX_RETRIES = 2;
+  private readonly RETRY_DELAY_MS = 500;
   private decimalsCache: Map<string, number> = new Map();
 
   /**
@@ -55,15 +58,19 @@ class TokenMetadataService {
     // Pre-populate SOL decimals
     this.decimalsCache.set(this.SOL_MINT_ADDRESS, this.SOL_DECIMALS);
     
-    console.log(`✅ TokenMetadataService initialized with RPC URL: ${url}`);
+    logger.info({ rpcUrl: url }, 'TokenMetadataService initialized');
   }
 
   /**
-   * Get token decimals
-   * 
+   * Get token decimals from on-chain mint account data.
+   *
+   * Retries up to {@link MAX_RETRIES} times on transient RPC failures before
+   * throwing. Never falls back to a default — using wrong decimals would cause
+   * catastrophic mis-pricing of trades.
+   *
    * @param tokenAddress - Token mint address
    * @returns Token decimals (number of decimal places)
-   * @throws TokenMetadataServiceError if fetch fails
+   * @throws TokenMetadataServiceError if decimals cannot be fetched after retries
    */
   async getTokenDecimals(tokenAddress: string): Promise<number> {
     // Check cache first
@@ -71,7 +78,7 @@ class TokenMetadataService {
       return this.decimalsCache.get(tokenAddress)!;
     }
 
-    // SOL has fixed decimals
+    // SOL has fixed decimals — this is a Solana protocol constant
     if (tokenAddress.toLowerCase() === this.SOL_MINT_ADDRESS.toLowerCase()) {
       this.decimalsCache.set(tokenAddress, this.SOL_DECIMALS);
       return this.SOL_DECIMALS;
@@ -81,43 +88,77 @@ class TokenMetadataService {
       this.initialize();
     }
 
-    try {
-      const mintPublicKey = new PublicKey(tokenAddress);
-      
-      // Fetch mint account info using RPC
-      // Mint accounts have a specific structure: https://spl.solana.com/token#finding-a-token-account
-      // The decimals are stored at offset 44 in the account data
-      const accountInfo = await this.connection!.getAccountInfo(mintPublicKey);
-      
-      if (!accountInfo) {
-        throw new Error(`Token account not found: ${tokenAddress}`);
+    return this.fetchDecimalsWithRetry(tokenAddress);
+  }
+
+  /**
+   * Fetch decimals from the on-chain mint account with retry logic.
+   *
+   * Retries absorb transient RPC errors (network blips, rate limits). If all
+   * attempts fail the error propagates so callers can abort the trade safely.
+   */
+  private async fetchDecimalsWithRetry(tokenAddress: string): Promise<number> {
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        const decimals = await this.fetchDecimalsFromChain(tokenAddress);
+
+        // Only cache a value we actually read from chain
+        this.decimalsCache.set(tokenAddress, decimals);
+        return decimals;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        logger.warn(
+          { tokenAddress, attempt, maxRetries: this.MAX_RETRIES, error: lastError.message },
+          'Token decimals fetch attempt failed'
+        );
+
+        // Wait before retrying (skip delay on final attempt)
+        if (attempt < this.MAX_RETRIES) {
+          await this.delay(this.RETRY_DELAY_MS);
+        }
       }
-
-      // Mint account data structure:
-      // - Bytes 0-35: mint authority (Pubkey, 32 bytes) + option flag (1 byte) + padding (2 bytes)
-      // - Bytes 36-43: supply (u64, 8 bytes)
-      // - Bytes 44: decimals (u8, 1 byte)
-      // - Bytes 45-76: is_initialized (bool, 1 byte) + freeze_authority (Pubkey, 32 bytes) + option flag (1 byte) + padding (2 bytes)
-      
-      if (accountInfo.data.length < 45) {
-        throw new Error(`Invalid mint account data length: ${accountInfo.data.length}`);
-      }
-
-      const decimals = accountInfo.data[44];
-
-      // Cache the result
-      this.decimalsCache.set(tokenAddress, decimals);
-
-      return decimals;
-    } catch (error) {
-      console.error(`Failed to fetch decimals for token ${tokenAddress}:`, error);
-      
-      // Default to 9 decimals (most common) if fetch fails
-      const defaultDecimals = 9;
-      console.warn(`Using default decimals (${defaultDecimals}) for token ${tokenAddress}`);
-      this.decimalsCache.set(tokenAddress, defaultDecimals);
-      return defaultDecimals;
     }
+
+    // All retries exhausted — throw so the trade is aborted rather than
+    // proceeding with potentially wrong decimals
+    throw new TokenMetadataServiceError(
+      `Failed to fetch decimals for token ${tokenAddress} after ${this.MAX_RETRIES} attempts: ${lastError?.message}`,
+      'DECIMALS_FETCH_FAILED',
+      { tokenAddress, lastError: lastError?.message }
+    );
+  }
+
+  /**
+   * Read decimals from the on-chain SPL Token mint account.
+   *
+   * @see https://spl.solana.com/token#finding-a-token-account
+   */
+  private async fetchDecimalsFromChain(tokenAddress: string): Promise<number> {
+    const mintPublicKey = new PublicKey(tokenAddress);
+
+    const accountInfo = await this.connection!.getAccountInfo(mintPublicKey);
+
+    if (!accountInfo) {
+      throw new Error(`Token account not found: ${tokenAddress}`);
+    }
+
+    // Mint account data structure:
+    // - Bytes 0-35: mint authority (Pubkey, 32 bytes) + option flag (1 byte) + padding (2 bytes)
+    // - Bytes 36-43: supply (u64, 8 bytes)
+    // - Byte  44:    decimals (u8, 1 byte)
+    // - Bytes 45-76: is_initialized + freeze_authority + option flag + padding
+    if (accountInfo.data.length < 45) {
+      throw new Error(`Invalid mint account data length: ${accountInfo.data.length}`);
+    }
+
+    return accountInfo.data[44];
+  }
+
+  /** Simple async delay helper for retry back-off. */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**

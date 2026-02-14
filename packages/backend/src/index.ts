@@ -125,6 +125,7 @@ import { signalProcessor } from '@/domain/signals/signal-processor.service.js';
 import { WalletLoader } from '@/infrastructure/wallets/wallet-loader.js';
 import { walletStore } from '@/infrastructure/wallets/index.js';
 import { balanceSnapshotScheduler } from '@/domain/balances/balance-snapshot-scheduler.js';
+import { seedAdminAccount } from '@/infrastructure/database/seed-admin.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '4000', 10);
@@ -158,9 +159,9 @@ app.use(helmet());
 
 app.use(cors(corsOptions));
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing middleware (1MB limit — trading API payloads are small)
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Request logging middleware (structured logging with request IDs)
 app.use(requestLogger);
@@ -213,6 +214,10 @@ async function startServer() {
     // Initialize Redis
     console.log('🔌 Connecting to Redis...');
     await redisService.connect();
+
+    // Seed admin account on first boot (no-op if a user already exists)
+    console.log('👤 Checking admin account...');
+    await seedAdminAccount();
 
     // Load wallets from environment variables
     console.log('🔑 Loading wallets from environment variables...');
