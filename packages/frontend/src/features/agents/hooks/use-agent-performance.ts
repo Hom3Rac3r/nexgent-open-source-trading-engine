@@ -62,40 +62,49 @@ export function useAgentPerformance(
     // If no wallet address is provided (no wallet for current trading mode), return empty metrics
     if (!agentId || !walletAddress) return INITIAL_METRICS;
 
-    // Calculate real-time stats from active positions
+    // Calculate real-time position values for live price updates between API calls.
+    // We compute a "delta" (change since the API snapshot) rather than recomputing absolute
+    // unrealized P&L, because the cost basis formula in the frontend cannot correctly handle
+    // positions where take-profit and DCA interleave (the backend uses TP transaction lookups
+    // for an exact remaining cost basis). The delta approach avoids this issue because the
+    // proportional cost basis errors cancel out in the difference.
     let currentPositionsValueSol = 0;
-    let currentUnrealizedPnLSol = 0;
+    let currentApproxUnrealizedSol = 0;
 
     activePositions.forEach(pos => {
       // Use current price if available, otherwise fall back to purchase price (0 PnL)
       const price = pos.currentPrice ?? pos.purchasePrice;
       
       // Use remainingAmount for positions with partial take-profits, fallback to purchaseAmount
-      // This ensures position value reflects only tokens currently held, not tokens already sold
-      // (sold tokens' value is already reflected in SOL balance from sale proceeds)
       const currentHolding = pos.remainingAmount ?? pos.purchaseAmount;
       
       const value = price * currentHolding;
-      const costBasis = pos.purchasePrice * currentHolding;
+
+      // Approximate cost basis for delta calculation only (not used as absolute P&L).
+      // Use totalInvestedSol when available for fee-inclusive cost, else purchasePrice.
+      const totalInvested = pos.totalInvestedSol ?? (pos.purchasePrice * pos.purchaseAmount);
+      const costBasis = pos.purchaseAmount > 0
+        ? (currentHolding / pos.purchaseAmount) * totalInvested
+        : pos.purchasePrice * currentHolding;
 
       currentPositionsValueSol += value;
-      currentUnrealizedPnLSol += (value - costBasis);
+      currentApproxUnrealizedSol += (value - costBasis);
     });
 
-    // Combine baseline API metrics with live position data
-    // The API returns portfolioBalanceSol as a snapshot (SOL balance + position values at call time).
-    // We approximate live updates by adjusting for the unrealized PnL delta since the API call.
-    const unrealizedDelta = currentUnrealizedPnLSol - baselineMetrics.unrealizedProfitLossSol;
+    // Delta approach: only the CHANGE in unrealized P&L since the API snapshot.
+    // The proportional cost basis errors cancel out in the difference, so the delta
+    // accurately reflects price movements without introducing cost basis drift.
+    const unrealizedDelta = currentApproxUnrealizedSol - baselineMetrics.unrealizedProfitLossSol;
 
     return {
       ...baselineMetrics,
-      // Update unrealized PnL with live data
-      unrealizedProfitLossSol: currentUnrealizedPnLSol,
+      // Update unrealized PnL: API baseline adjusted by price-change delta
+      unrealizedProfitLossSol: baselineMetrics.unrealizedProfitLossSol + unrealizedDelta,
 
-      // Update total PnL
-      totalProfitLossSol: baselineMetrics.realizedProfitLossSol + currentUnrealizedPnLSol,
+      // Update total PnL: API total adjusted by same delta (keeps realized + unrealized consistent)
+      totalProfitLossSol: baselineMetrics.totalProfitLossSol + unrealizedDelta,
 
-      // Update portfolio balance by the difference in PnL
+      // Update portfolio balance by the same delta
       portfolioBalanceSol: baselineMetrics.portfolioBalanceSol + unrealizedDelta,
 
       // Update open positions count

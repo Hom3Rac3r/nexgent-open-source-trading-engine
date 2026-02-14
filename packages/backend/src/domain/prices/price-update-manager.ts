@@ -938,16 +938,26 @@ class PriceUpdateManager {
     }
 
     try {
+      // Re-fetch position from DB to ensure we have the latest dcaCount and purchasePrice
+      // This prevents stale Redis cache from causing missed DCA triggers
+      const freshPosition = await positionService.getPositionById(position.id);
+      if (!freshPosition) {
+        return; // Position was closed
+      }
+
+      // Use fresh position data for DCA evaluation
+      const evalPosition = freshPosition;
+
       // Evaluate DCA
-      const evaluation = await dcaManager.evaluateDCA(position, currentPrice, config);
+      const evaluation = await dcaManager.evaluateDCA(evalPosition, currentPrice, config);
 
       logger.debug({
-        positionId: position.id,
-        agentId: position.agentId,
-        tokenAddress: position.tokenAddress,
+        positionId: evalPosition.id,
+        agentId: evalPosition.agentId,
+        tokenAddress: evalPosition.tokenAddress,
         currentPrice,
-        avgPrice: position.purchasePrice,
-        dcaCount: position.dcaCount,
+        avgPrice: evalPosition.purchasePrice,
+        dcaCount: evalPosition.dcaCount,
         shouldTrigger: evaluation.shouldTrigger,
         reason: evaluation.reason,
         triggerLevel: evaluation.triggerLevel,
@@ -957,23 +967,29 @@ class PriceUpdateManager {
       if (evaluation.shouldTrigger && evaluation.triggerLevel && evaluation.buyAmountSol) {
         // Pre-check 1: Check if DCA is suspended for this position (failed recently)
         // This prevents repeated Jupiter API calls when we know it will fail
-        const dcaSuspendKey = `dca_suspend:${position.id}`;
+        const dcaSuspendKey = `dca_suspend:${evalPosition.id}`;
         const dcaSuspended = await idempotencyService.isInProgress(dcaSuspendKey);
 
         if (dcaSuspended) {
-          // DCA is suspended due to recent failure - skip silently
+          // DCA is suspended due to recent failure — log so operators can diagnose
+          logger.info({
+            positionId: evalPosition.id,
+            tokenSymbol: evalPosition.tokenSymbol,
+            dcaCount: evalPosition.dcaCount,
+            triggerLevel: evaluation.triggerLevel,
+          }, 'DCA skipped: suspended after recent failure (60s cooldown)');
           return;
         }
 
         // Pre-check 2: Check if DCA is already in progress for this position/level
-        // This prevents log spam from concurrent execution guard in trading executor
-        const dcaKey = `dca:${position.id}:${evaluation.triggerLevel.dropPercent}`;
+        // Key includes dcaCount so each DCA attempt gets a unique idempotency key
+        const dcaKey = `dca:${evalPosition.id}:${evalPosition.dcaCount}:${evaluation.triggerLevel.dropPercent}`;
         const dcaInProgress = await idempotencyService.isInProgress(dcaKey);
 
         if (dcaInProgress) {
           logger.debug({
-            positionId: position.id,
-            tokenAddress: position.tokenAddress,
+            positionId: evalPosition.id,
+            tokenAddress: evalPosition.tokenAddress,
           }, 'DCA skipped: already in progress');
           return; // Skip - DCA already executing for this position/level
         }
@@ -981,54 +997,60 @@ class PriceUpdateManager {
         // Pre-check 3: Check SOL balance before attempting DCA buy
         // This prevents unnecessary Jupiter API calls when balance is insufficient
         const solBalance = await redisBalanceService.getBalance(
-          position.agentId,
-          position.walletAddress,
+          evalPosition.agentId,
+          evalPosition.walletAddress,
           this.SOL_TOKEN_ADDRESS
         );
         const solBalanceNum = solBalance ? parseFloat(solBalance.balance) : 0;
 
         if (solBalanceNum < evaluation.buyAmountSol) {
-          logger.debug({
-            positionId: position.id,
-            tokenAddress: position.tokenAddress,
+          logger.warn({
+            positionId: evalPosition.id,
+            tokenSymbol: evalPosition.tokenSymbol,
+            tokenAddress: evalPosition.tokenAddress,
             availableBalance: solBalanceNum.toFixed(4),
             requiredAmount: evaluation.buyAmountSol.toFixed(4),
+            dcaCount: evalPosition.dcaCount,
+            triggerLevel: evaluation.triggerLevel,
           }, 'DCA skipped: insufficient SOL balance');
           return; // Skip DCA - insufficient balance
         }
 
         dcaTriggerCount.inc({
-          agent_id: position.agentId,
-          token_address: position.tokenAddress,
+          agent_id: evalPosition.agentId,
+          token_address: evalPosition.tokenAddress,
           level: evaluation.triggerLevel.dropPercent.toString(),
         });
 
-        // Only log at debug level before attempt - success will log at info
-        logger.debug({
-          tokenSymbol: position.tokenSymbol,
+        logger.info({
+          positionId: evalPosition.id,
+          tokenSymbol: evalPosition.tokenSymbol,
+          dcaCount: evalPosition.dcaCount,
           dropPercent: evaluation.triggerLevel.dropPercent,
           buyAmountSol: evaluation.buyAmountSol.toFixed(4),
+          availableBalance: solBalanceNum.toFixed(4),
         }, 'DCA attempting');
 
         try {
           const dcaStartTime = Date.now();
           const result = await tradingExecutor.executeDCABuy({
-            agentId: position.agentId,
-            positionId: position.id,
+            agentId: evalPosition.agentId,
+            positionId: evalPosition.id,
             buyAmountSol: evaluation.buyAmountSol,
             triggerLevel: evaluation.triggerLevel,
+            dcaCount: evalPosition.dcaCount,
           });
 
           const dcaDuration = Date.now() - dcaStartTime;
           const dcaDurationSeconds = dcaDuration / 1000;
 
           dcaExecutionLatency.observe({
-            agent_id: position.agentId,
-            token_address: position.tokenAddress,
+            agent_id: evalPosition.agentId,
+            token_address: evalPosition.tokenAddress,
           }, dcaDurationSeconds);
 
           logger.info({
-            tokenSymbol: position.tokenSymbol,
+            tokenSymbol: evalPosition.tokenSymbol,
             solSpent: result.solSpent.toFixed(4),
             newDcaCount: result.newDcaCount,
             duration: dcaDuration,
@@ -1041,26 +1063,40 @@ class PriceUpdateManager {
           const isInsufficientFunds = errorMessage.includes('Insufficient') ||
             errorMessage.includes('INSUFFICIENT_BALANCE');
           const isAlreadyInProgress = errorMessage.includes('already in progress');
-          const isExpectedError = isInsufficientFunds || isAlreadyInProgress;
+          const isPositionLocked = errorMessage.includes('POSITION_LOCKED') ||
+            errorMessage.includes('another operation is in progress');
+          const isExpectedError = isInsufficientFunds || isAlreadyInProgress || isPositionLocked;
 
           if (isInsufficientFunds) {
             // Suspend DCA for this position for 60 seconds to avoid repeated API calls
-            const dcaSuspendKey = `dca_suspend:${position.id}`;
+            const dcaSuspendKey = `dca_suspend:${evalPosition.id}`;
             await idempotencyService.checkAndSet(dcaSuspendKey, 60); // 60 second cooldown
-            logger.debug({
-              tokenSymbol: position.tokenSymbol,
+            logger.warn({
+              positionId: evalPosition.id,
+              tokenSymbol: evalPosition.tokenSymbol,
+              dcaCount: evalPosition.dcaCount,
               suspendSeconds: 60,
             }, 'DCA suspended: insufficient funds');
+          } else if (isPositionLocked) {
+            // Position is locked by another operation - will retry next cycle
+            logger.info({
+              positionId: evalPosition.id,
+              tokenSymbol: evalPosition.tokenSymbol,
+              dcaCount: evalPosition.dcaCount,
+            }, 'DCA deferred: position locked by another operation');
           } else if (isExpectedError) {
-            // Other expected errors - just log
-            logger.debug({
-              tokenSymbol: position.tokenSymbol,
+            // Other expected errors - log at info so operators can see
+            logger.info({
+              positionId: evalPosition.id,
+              tokenSymbol: evalPosition.tokenSymbol,
               error: errorMessage,
             }, 'DCA skipped');
           } else {
             // Unexpected errors - log at error level
             logger.error({
-              tokenSymbol: position.tokenSymbol,
+              positionId: evalPosition.id,
+              tokenSymbol: evalPosition.tokenSymbol,
+              dcaCount: evalPosition.dcaCount,
               error: errorMessage,
             }, 'DCA failed');
           }
@@ -1069,6 +1105,7 @@ class PriceUpdateManager {
     } catch (error) {
       // Log but don't throw - DCA evaluation failure shouldn't stop price updates
       logger.error({
+        positionId: position.id,
         tokenSymbol: position.tokenSymbol,
         error: error instanceof Error ? error.message : String(error),
       }, 'DCA evaluation error');

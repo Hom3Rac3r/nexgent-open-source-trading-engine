@@ -173,6 +173,10 @@ export class PerformanceService {
    * IMPORTANT: Uses remainingAmount (not purchaseAmount) for positions with partial take-profits.
    * This ensures position value reflects only tokens currently held, not tokens already sold.
    * Also tracks realized profit from partial take-profit sales (stored on position.realizedProfitSol).
+   * 
+   * Cost basis for unrealized P&L is computed using the actual cost of sold tokens from TP
+   * transactions, not a proportional share of totalInvestedSol. This is critical when DCA
+   * buys interleave with take-profit sales (changing the average cost after tokens were sold).
    */
   private async getPositionMetrics(agentId: string, walletAddress?: string) {
     const positionIds = await redisPositionService.getAgentPositionIds(agentId);
@@ -181,6 +185,10 @@ export class PerformanceService {
     let totalPositionsValueSol = 0;
     let realizedProfitFromTakeProfits = 0; // Profit from partial take-profit sales
     let count = 0;
+
+    // Collect all TP transaction IDs across positions for a single batch query
+    const tpTxIdsByPosition = new Map<string, string[]>();
+    const positionsToProcess: Array<{ id: string; position: Record<string, unknown> }> = [];
 
     for (const id of positionIds) {
       let position = await redisPositionService.getPosition(id);
@@ -201,11 +209,46 @@ export class PerformanceService {
         }
       }
 
+      const posRecord = position as Record<string, unknown>;
+      positionsToProcess.push({ id, position: posRecord });
+
+      // Collect TP transaction IDs for batch lookup
+      const tpTxIds = posRecord.takeProfitTransactionIds as string[] | undefined;
+      if (tpTxIds && tpTxIds.length > 0) {
+        tpTxIdsByPosition.set(id, tpTxIds);
+      }
+    }
+
+    // Batch-fetch all TP transactions to compute actual sale proceeds per position
+    // This is needed for correct cost basis when DCA interleaves with take-profit
+    const allTpTxIds = Array.from(tpTxIdsByPosition.values()).flat();
+    const tpProceedsByTxId = new Map<string, number>();
+
+    if (allTpTxIds.length > 0) {
+      const tpTransactions = await prisma.agentTransaction.findMany({
+        where: { id: { in: allTpTxIds } },
+        select: {
+          id: true,
+          outputAmount: true,
+          protocolFeeSol: true,
+          networkFeeSol: true,
+        },
+      });
+
+      for (const tx of tpTransactions) {
+        const output = tx.outputAmount != null ? parseFloat(tx.outputAmount.toString()) : 0;
+        const protocolFee = tx.protocolFeeSol != null ? parseFloat(tx.protocolFeeSol.toString()) : 0;
+        const networkFee = tx.networkFeeSol != null ? parseFloat(tx.networkFeeSol.toString()) : 0;
+        tpProceedsByTxId.set(tx.id, output - protocolFee - networkFee);
+      }
+    }
+
+    for (const { id, position } of positionsToProcess) {
       count++;
       // Values from Redis may be Prisma Decimals (serialized as object); use safe conversion
       const purchasePrice = toNumber(position.purchasePrice);
       const purchaseAmountNum = toNumber(position.purchaseAmount);
-      const remainingAmountNum = toNumber((position as Record<string, unknown>).remainingAmount);
+      const remainingAmountNum = toNumber(position.remainingAmount);
       // Use remainingAmount for positions with partial take-profits, fallback to purchaseAmount
       // This is critical: after take-profit sales, remainingAmount reflects current holdings
       const currentHolding = Number.isNaN(remainingAmountNum) ? purchaseAmountNum : remainingAmountNum;
@@ -213,12 +256,12 @@ export class PerformanceService {
 
       // Track realized profit from partial take-profit sales
       // This profit is NOT in historical swaps (those are only for fully closed positions)
-      const positionRealizedProfit = toNumber((position as Record<string, unknown>).realizedProfitSol ?? 0);
+      const positionRealizedProfit = toNumber(position.realizedProfitSol ?? 0);
       realizedProfitFromTakeProfits += Number.isFinite(positionRealizedProfit) ? positionRealizedProfit : 0;
 
       // Get current price from cache
       // Note: Token addresses in Redis Price Service are normalized to lowercase
-      const tokenAddr = String((position as Record<string, unknown>).tokenAddress ?? '');
+      const tokenAddr = String(position.tokenAddress ?? '');
       const currentPriceData = await redisPriceService.getPrice(tokenAddr.toLowerCase());
 
       let currentPrice = Number.isFinite(purchasePrice) ? purchasePrice : 0; // Fallback to purchase price if no live price (0 PnL)
@@ -226,15 +269,46 @@ export class PerformanceService {
         currentPrice = currentPriceData.priceSol;
       }
 
-      // Calculate value and unrealized P/L based on CURRENT holdings (not original amount)
-      // Use proportional totalInvestedSol for cost basis so buy-side fees are included.
-      // Falls back to purchasePrice * holding for positions without totalInvestedSol.
-      const totalInvestedSolNum = toNumber((position as Record<string, unknown>).totalInvestedSol);
-      const costBasis = (Number.isFinite(totalInvestedSolNum) && totalInvestedSolNum > 0 && purchaseAmountNum > 0)
-        ? (currentHolding / purchaseAmountNum) * totalInvestedSolNum
-        : purchasePrice * currentHolding;
+      const totalInvestedSolNum = toNumber(position.totalInvestedSol);
       const currentValue = currentPrice * currentHolding;
-      if (!Number.isFinite(currentValue) || !Number.isFinite(costBasis)) continue;
+      if (!Number.isFinite(currentValue)) continue;
+
+      // Calculate remaining cost basis correctly for positions with both DCA and take-profit.
+      //
+      // The proportional formula `(currentHolding / purchaseAmount) * totalInvestedSol`
+      // breaks when TP sells tokens at one average cost and DCA later changes the average.
+      // Instead, compute remaining cost = totalInvestedSol - cost_of_sold_tokens.
+      //
+      // We derive cost_of_sold_tokens from TP proceeds and realized profit:
+      //   realizedProfitSol = TP_proceeds - cost_of_sold_tokens
+      //   cost_of_sold_tokens = TP_proceeds - realizedProfitSol
+      //   remaining_cost = totalInvestedSol - TP_proceeds + realizedProfitSol
+      let costBasis: number;
+      const tpTxIds = tpTxIdsByPosition.get(id);
+
+      if (tpTxIds && tpTxIds.length > 0 && Number.isFinite(totalInvestedSolNum) && totalInvestedSolNum > 0) {
+        // Compute total net TP proceeds from actual transactions
+        let totalTPProceeds = 0;
+        for (const txId of tpTxIds) {
+          const proceeds = tpProceedsByTxId.get(txId);
+          if (proceeds != null && Number.isFinite(proceeds)) {
+            totalTPProceeds += proceeds;
+          }
+        }
+
+        // remaining_cost = totalInvested - TP_proceeds + realizedProfit
+        // This is always correct regardless of DCA/TP ordering
+        const safeRealizedProfit = Number.isFinite(positionRealizedProfit) ? positionRealizedProfit : 0;
+        costBasis = totalInvestedSolNum - totalTPProceeds + safeRealizedProfit;
+      } else if (Number.isFinite(totalInvestedSolNum) && totalInvestedSolNum > 0 && purchaseAmountNum > 0) {
+        // No TP activity — proportional formula is correct
+        costBasis = (currentHolding / purchaseAmountNum) * totalInvestedSolNum;
+      } else {
+        // Fallback for old positions without totalInvestedSol
+        costBasis = purchasePrice * currentHolding;
+      }
+
+      if (!Number.isFinite(costBasis)) continue;
 
       totalPositionsValueSol += currentValue;
       unrealizedProfitLossSol += (currentValue - costBasis);

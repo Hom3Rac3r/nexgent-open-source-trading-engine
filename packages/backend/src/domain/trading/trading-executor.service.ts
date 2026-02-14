@@ -143,6 +143,8 @@ export interface DCABuyRequest {
     dropPercent: number;
     buyPercent: number;
   };
+  /** Current DCA count at time of evaluation (used for unique idempotency keys) */
+  dcaCount: number;
 }
 
 /**
@@ -1376,8 +1378,8 @@ class TradingExecutor {
     const startTime = Date.now();
 
     // Idempotency check: prevent duplicate DCA executions for the same trigger level
-    // Key includes dropPercent so the same price drop can't trigger multiple buys
-    const dcaKey = `dca:${request.positionId}:${request.triggerLevel.dropPercent}`;
+    // Key includes dcaCount + dropPercent so each DCA attempt gets a unique key
+    const dcaKey = `dca:${request.positionId}:${request.dcaCount}:${request.triggerLevel.dropPercent}`;
     const canProceed = await idempotencyService.checkAndSet(dcaKey, REDIS_TTL.IDEMPOTENCY);
 
     if (!canProceed) {

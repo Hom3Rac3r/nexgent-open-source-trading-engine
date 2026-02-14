@@ -175,13 +175,16 @@ class DCAManager {
       const currentPositionValueSol = currentPrice * effectiveAmount;
       const buyAmountSol = (currentPositionValueSol * targetLevel.buyPercent) / 100;
 
-      logger.debug({
+      logger.info({
         positionId: position.id,
         tokenSymbol: position.tokenSymbol,
         dropPercent: dropPercent.toFixed(2),
         targetDropPercent: targetLevel.dropPercent,
-        buyAmountSol,
+        buyAmountSol: buyAmountSol.toFixed(6),
+        effectiveAmount,
+        currentPositionValueSol: currentPositionValueSol.toFixed(6),
         dcaCount: position.dcaCount,
+        levelIndex,
       }, 'DCA level triggered (evaluation)');
 
       return {
