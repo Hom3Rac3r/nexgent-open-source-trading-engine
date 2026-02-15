@@ -10,24 +10,39 @@ import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+/**
+ * Builds the connect-src CSP directive. In development, allows the backend API
+ * (http://localhost:4000 or NEXT_PUBLIC_API_URL) so fetch/XHR to the API are not blocked.
+ */
+function getConnectSrc(): string {
+  const base = "'self' wss: ws: https:";
+  if (process.env.NODE_ENV !== 'production') {
+    const apiOrigin = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    return `${base} ${apiOrigin}`;
+  }
+  return base;
+}
+
 /** Security headers applied to every response. */
-const securityHeaders: Record<string, string> = {
-  // Prevent the page from being embedded in iframes (clickjacking protection)
-  'X-Frame-Options': 'DENY',
-  // Block MIME-type sniffing
-  'X-Content-Type-Options': 'nosniff',
-  // Enforce HTTPS for 1 year including subdomains
-  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
-  // Control what information is sent in the Referer header
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-  // Restrict browser features the app doesn't need
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
-  // Prevent XSS in older browsers (modern browsers use CSP instead)
-  'X-XSS-Protection': '1; mode=block',
-  // Basic CSP — tighten further once you audit third-party scripts
-  'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' wss: ws: https:; frame-ancestors 'none';",
-};
+function getSecurityHeaders(): Record<string, string> {
+  return {
+    // Prevent the page from being embedded in iframes (clickjacking protection)
+    'X-Frame-Options': 'DENY',
+    // Block MIME-type sniffing
+    'X-Content-Type-Options': 'nosniff',
+    // Enforce HTTPS for 1 year including subdomains
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+    // Control what information is sent in the Referer header
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    // Restrict browser features the app doesn't need
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    // Prevent XSS in older browsers (modern browsers use CSP instead)
+    'X-XSS-Protection': '1; mode=block',
+    // Basic CSP — tighten further once you audit third-party scripts. connect-src allows API in dev.
+    'Content-Security-Policy':
+      `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src ${getConnectSrc()}; frame-ancestors 'none';`,
+  };
+}
 
 /**
  * Applies security headers to a NextResponse.
@@ -36,7 +51,7 @@ const securityHeaders: Record<string, string> = {
  * @returns The same response with security headers set
  */
 function applySecurityHeaders(response: NextResponse): NextResponse {
-  for (const [key, value] of Object.entries(securityHeaders)) {
+  for (const [key, value] of Object.entries(getSecurityHeaders())) {
     response.headers.set(key, value);
   }
   return response;

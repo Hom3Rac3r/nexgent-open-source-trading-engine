@@ -166,13 +166,14 @@ export function CreateAgentDialog({
         message="create"
       />
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col overflow-hidden p-0 gap-0">
+        <DialogHeader className="shrink-0 px-6 pt-6 pb-4">
           <DialogTitle>Create New Agent</DialogTitle>
           <DialogDescription>
             Create your own AI agent with a unique name.
           </DialogDescription>
         </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             <FormField
@@ -327,6 +328,7 @@ export function CreateAgentDialog({
             </div>
           </form>
         </Form>
+        </div>
       </DialogContent>
     </Dialog>
     </>

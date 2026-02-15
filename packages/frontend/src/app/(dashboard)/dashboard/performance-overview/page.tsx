@@ -467,7 +467,7 @@ export default function PerformanceOverviewPage() {
               <Button
                 variant="outline"
                 className="h-full flex flex-col items-center justify-center gap-2"
-                onClick={() => router.push('/dashboard/signals')}
+                onClick={() => router.push('/dashboard/trade-signals')}
               >
                 <TrendingUp className="h-5 w-5" />
                 <span>Trading Signals</span>
