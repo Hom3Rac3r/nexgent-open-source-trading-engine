@@ -1,0 +1,25 @@
+# CODEOWNERS — Define who is responsible for code in this repository.
+# GitHub will request reviews from these owners when PRs touch matching paths.
+# Replace placeholders with your GitHub usernames or @org/team-name.
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo.
+* @nexgent-ai/maintainers
+
+# Backend — Express API, domain, infrastructure
+/packages/backend/ @nexgent-ai/maintainers
+
+# Frontend — Next.js dashboard, features, UI
+/packages/frontend/ @nexgent-ai/maintainers
+
+# Shared — Types, schemas, validators
+/packages/shared/ @nexgent-ai/maintainers
+
+# GitHub workflows, issue templates, CI config
+/.github/ @nexgent-ai/maintainers
+
+# Root config, scripts, docs
+*.yml *.yaml @nexgent-ai/maintainers
+/scripts/ @nexgent-ai/maintainers
+/docs/ @nexgent-ai/maintainers
