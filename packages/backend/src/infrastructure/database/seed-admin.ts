@@ -13,16 +13,14 @@
  */
 
 import { prisma } from './client.js';
-import {
-  hashPassword,
-  verifyPassword,
-  validatePasswordStrength,
-} from '@/shared/utils/auth/password.js';
+import { hashPassword, verifyPassword } from '@/shared/utils/auth/password.js';
 
 /**
  * Validates ADMIN_EMAIL and ADMIN_PASSWORD env vars and returns them.
+ * No password strength rules are enforced so deployment platforms (e.g. Railway)
+ * can accept any value the user sets without causing startup failure.
  *
- * @throws Error if env vars are missing or invalid
+ * @throws Error if env vars are missing or email is invalid
  * @returns Validated email and password
  */
 function getValidatedAdminCredentials(): { email: string; password: string } {
@@ -39,14 +37,6 @@ function getValidatedAdminCredentials(): { email: string; password: string } {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     throw new Error(`ADMIN_EMAIL "${email}" is not a valid email address.`);
-  }
-
-  const strength = validatePasswordStrength(password);
-  if (!strength.valid) {
-    throw new Error(
-      'ADMIN_PASSWORD does not meet strength requirements: ' +
-        strength.errors.join('; ')
-    );
   }
 
   return { email, password };
