@@ -14,6 +14,7 @@ import type { AgentTradingConfig, DCAConfig, SignalConfig, TakeProfitConfig } fr
  */
 export const COMMON_SIGNAL_TYPES = [
   'Velocity (Dormant Explosion)',
+  'Velocity (Dex Boost Detection)',
   'Velocity (Hyper Surge Detection)',
   'Velocity (Price Reversal Detection)',
   'Velocity (Breakout Confirmation)',
