@@ -146,8 +146,8 @@ export default function GeneralPage() {
                             <Bot className="h-5 w-5" />
                           </AvatarFallback>
                         </Avatar>
-                        <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">
+                        <div className="flex-1 space-y-1 min-w-0 overflow-hidden">
+                          <p className="text-sm font-medium leading-none truncate" title={agent.name || undefined}>
                             {agent.name || 'Unnamed Agent'}
                           </p>
                           <div className="flex items-center gap-2">

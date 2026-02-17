@@ -77,13 +77,13 @@ function AgentSwitcherComponent({ className }: AgentSwitcherProps) {
           className={cn("w-full justify-between px-4 py-6", className)}
           disabled={agents.length === 0 && !isLoading}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             {renderLogo()}
-            <div className="flex flex-col items-start">
-              <span className="text-sm font-medium">
+            <div className="flex flex-col items-start min-w-0 flex-1 overflow-hidden">
+              <span className="text-sm font-medium truncate w-full" title={selectedAgent?.name}>
                 {selectedAgent?.name || 'No agents found'}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground truncate w-full">
                 {agents.length === 0 && !isLoading ? "Create an agent to start" : "Click to swap agent"}
               </span>
             </div>
@@ -102,17 +102,19 @@ function AgentSwitcherComponent({ className }: AgentSwitcherProps) {
               <Button
                 key={agent.id}
                 variant="ghost"
-                className="w-full justify-start gap-2"
+                className="w-full justify-start gap-2 min-w-0"
                 onClick={() => handleAgentSelect(agent)}
               >
                 {renderLogo()}
-                <div className="flex flex-col items-start flex-1">
-                  <div className="flex items-center justify-between w-full gap-2">
-                    <span className="text-sm">{agent.name}</span>
+                <div className="flex flex-col items-start flex-1 min-w-0 overflow-hidden">
+                  <div className="flex items-center justify-between w-full gap-2 min-w-0">
+                    <span className="text-sm truncate" title={agent.name}>
+                      {agent.name}
+                    </span>
                   </div>
                 </div>
                 {selectedAgentId === agent.id && (
-                  <Check className="ml-auto h-4 w-4" />
+                  <Check className="ml-auto h-4 w-4 shrink-0" />
                 )}
               </Button>
             ))
