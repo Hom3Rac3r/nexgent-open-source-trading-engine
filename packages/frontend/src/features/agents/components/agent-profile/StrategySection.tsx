@@ -22,12 +22,63 @@ import { DCASection } from './DCASection';
 import { TakeProfitSection } from './TakeProfitSection';
 import { SignalsSection } from './SignalsSection';
 import { RiskManagementSection } from './RiskManagementSection';
+import { AutoTradeSection } from './AutoTradeSection';
 import type { AgentTradingConfig } from '@nexgent/shared';
 
 /** Optional signal metric keys; undefined means "no bound". We send null when cleared so the backend receives the key and can clear the value. */
 const OPTIONAL_SIGNAL_METRIC_KEYS = [
   'marketCapMin', 'marketCapMax', 'liquidityMin', 'liquidityMax', 'holderCountMin', 'holderCountMax',
 ] as const;
+/** Per-token optional metric keys on AutoTradeTokenConfig; same null-for-clear convention. */
+const OPTIONAL_AUTO_TRADE_TOKEN_METRIC_KEYS = ['marketCapMin', 'marketCapMax'] as const;
+
+/**
+ * Normalize auto-trade shape for the form.
+ * Per-token market-cap bounds are preserved as-is (null → undefined handled by Zod).
+ */
+function normalizeAutoTradeConfig(config: AgentTradingConfig): AgentTradingConfig {
+  const autoTrade = config.autoTrade;
+  if (!autoTrade) {
+    return {
+      ...config,
+      autoTrade: { enabled: false, tokens: [] },
+    };
+  }
+
+  const tokens = Array.isArray(autoTrade.tokens)
+    ? autoTrade.tokens.map((t) => ({
+        ...t,
+        marketCapMin: t.marketCapMin ?? undefined,
+        marketCapMax: t.marketCapMax ?? undefined,
+      }))
+    : [];
+
+  return {
+    ...config,
+    autoTrade: {
+      enabled: autoTrade.enabled ?? false,
+      tokens,
+    },
+  };
+}
+
+/** Default max slippage (5%) when not set. Used so the form always has a value for required maxPriceImpact. */
+const DEFAULT_MAX_PRICE_IMPACT = 0.05;
+
+/**
+ * Normalize config for the strategy form: auto-trade + ensure maxPriceImpact is set (required field).
+ */
+function normalizeConfigForForm(config: AgentTradingConfig): AgentTradingConfig {
+  const normalized = normalizeAutoTradeConfig(config);
+  const limits = normalized.purchaseLimits;
+  if (limits && limits.maxPriceImpact == null) {
+    return {
+      ...normalized,
+      purchaseLimits: { ...limits, maxPriceImpact: DEFAULT_MAX_PRICE_IMPACT },
+    };
+  }
+  return normalized;
+}
 
 function prepareTradingConfigPayload(values: AgentTradingConfigFormValues): Partial<AgentTradingConfig> {
   const payload = JSON.parse(JSON.stringify(values)) as AgentTradingConfig;
@@ -39,6 +90,19 @@ function prepareTradingConfigPayload(values: AgentTradingConfigFormValues): Part
       }
     }
   }
+
+  const autoTrade = payload.autoTrade;
+  if (autoTrade?.tokens) {
+    for (const token of autoTrade.tokens) {
+      const raw = token as unknown as Record<string, unknown>;
+      for (const key of OPTIONAL_AUTO_TRADE_TOKEN_METRIC_KEYS) {
+        if (raw[key] === undefined) {
+          raw[key] = null;
+        }
+      }
+    }
+  }
+
   // Derive purchase limits from position calculator
   if (payload.purchaseLimits && payload.positionCalculator) {
     const { positionSizes, solBalanceThresholds } = payload.positionCalculator;
@@ -82,7 +146,7 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
 
   const form = useForm<AgentTradingConfigFormValues>({
     resolver: zodResolver(agentTradingConfigSchema),
-    defaultValues: initialConfig,
+    defaultValues: normalizeConfigForForm(initialConfig),
     mode: 'onChange',
   });
 
@@ -91,7 +155,7 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
 
   // Sync when initialConfig changes (e.g. agent switch)
   React.useEffect(() => {
-    form.reset(initialConfig);
+    form.reset(normalizeConfigForForm(initialConfig));
     lastSavedJson.current = JSON.stringify(initialConfig);
   }, [agentId, initialConfig, form]);
 
@@ -153,6 +217,7 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
   // Tab configuration
   const tabOptions = [
     { value: 'purchase', label: 'Purchase & Position' },
+    { value: 'auto-trade', label: 'Auto Trade' },
     { value: 'signals', label: 'Signals' },
     { value: 'risk-management', label: 'Risk Management' },
     { value: 'stop-loss', label: 'Stop Loss' },
@@ -237,6 +302,7 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full hidden md:block">
               <TabsList className="w-auto">
                 <TabsTrigger value="purchase">Purchase & Position</TabsTrigger>
+                <TabsTrigger value="auto-trade">Auto Trade</TabsTrigger>
                 <TabsTrigger value="signals">Signals</TabsTrigger>
                 <TabsTrigger value="risk-management">Risk Management</TabsTrigger>
                 <TabsTrigger value="stop-loss">Stop Loss</TabsTrigger>
@@ -249,6 +315,7 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
             {/* Tab Content */}
             <div className="space-y-4 mt-4">
               {activeTab === 'purchase' && <PurchaseAndPositionSection />}
+              {activeTab === 'auto-trade' && <AutoTradeSection />}
               {activeTab === 'signals' && <SignalsSection />}
               {activeTab === 'risk-management' && <RiskManagementSection />}
               {activeTab === 'stop-loss' && <StopLossSection />}

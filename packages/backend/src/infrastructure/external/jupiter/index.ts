@@ -14,6 +14,7 @@ export * from './price/index.js';
 // Token metrics (signal pre-check)
 export {
   fetchTokenMetrics,
+  clearTokenMetricsCache,
   type TokenMetrics,
 } from './jupiter-token-metrics.service.js';
 

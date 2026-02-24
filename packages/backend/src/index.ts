@@ -114,6 +114,8 @@ import { prisma } from './infrastructure/database/client.js';
 import { PriceService } from './infrastructure/external/pyth/index.js';
 import { wsServer } from './infrastructure/websocket/server.js';
 import { priceUpdateManager } from './domain/prices/index.js';
+import { initializeAutoTradeReentryManager, shutdownAutoTradeReentryManager } from './domain/trading/auto-trade-reentry-manager.service.js';
+import { initializeAutoTradeReconciliationManager, shutdownAutoTradeReconciliationManager } from './domain/trading/auto-trade-reconciliation-manager.service.js';
 import type { Server } from 'http';
 import { errorHandler, notFoundHandler } from '@/middleware/error-handler.js';
 import { requestLogger } from '@/middleware/request-logger.js';
@@ -315,6 +317,10 @@ async function startServer() {
       // Initialize WebSocket server
       wsServer.initialize(server);
 
+      // Initialize auto-trade re-entry manager
+      initializeAutoTradeReentryManager();
+      initializeAutoTradeReconciliationManager();
+
       // Initialize price update manager (after WebSocket server)
       priceUpdateManager.initialize(wsServer);
 
@@ -391,6 +397,14 @@ function setupGracefulShutdown() {
         // Ensure server is fully destroyed and remove listeners
         server.removeAllListeners();
         server = null; // Clear reference
+      }
+
+      // Shutdown auto-trade managers
+      try {
+        shutdownAutoTradeReentryManager();
+        shutdownAutoTradeReconciliationManager();
+      } catch (error) {
+        console.error('❌ Error shutting down auto-trade managers:', error);
       }
 
       // Shutdown price update manager

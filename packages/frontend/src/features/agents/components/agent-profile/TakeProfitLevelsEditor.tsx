@@ -2,7 +2,7 @@
 
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from '@/shared/components/ui/button';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   FormControl,
   FormField,
@@ -128,32 +128,10 @@ export function TakeProfitLevelsEditor() {
                         <FormItem className="space-y-0">
                           <FormControl>
                             <div className="flex items-center gap-1">
-                              <Input
-                                {...field}
-                                type="number"
-                                step="10"
-                                min="1"
-                                max="10000"
+                              <NumericInput
+                                value={field.value}
+                                onChange={(v) => field.onChange(v)}
                                 className="max-w-[100px]"
-                                placeholder="50"
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  if (value === '') {
-                                    field.onChange(value);
-                                  } else {
-                                    const numValue = parseFloat(value);
-                                    if (!isNaN(numValue)) {
-                                      field.onChange(numValue);
-                                    }
-                                  }
-                                }}
-                                onBlur={(e) => {
-                                  const value = e.target.value;
-                                  if (value === '') {
-                                    field.onChange(50);
-                                  }
-                                }}
-                                value={field.value ?? ''}
                               />
                               <span className="text-muted-foreground text-sm">%</span>
                             </div>
@@ -171,32 +149,10 @@ export function TakeProfitLevelsEditor() {
                         <FormItem className="space-y-0">
                           <FormControl>
                             <div className="flex items-center gap-1">
-                              <Input
-                                {...field}
-                                type="number"
-                                step="5"
-                                min="1"
-                                max="100"
+                              <NumericInput
+                                value={field.value}
+                                onChange={(v) => field.onChange(v)}
                                 className="max-w-[100px]"
-                                placeholder="25"
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  if (value === '') {
-                                    field.onChange(value);
-                                  } else {
-                                    const numValue = parseFloat(value);
-                                    if (!isNaN(numValue)) {
-                                      field.onChange(numValue);
-                                    }
-                                  }
-                                }}
-                                onBlur={(e) => {
-                                  const value = e.target.value;
-                                  if (value === '') {
-                                    field.onChange(25);
-                                  }
-                                }}
-                                value={field.value ?? ''}
                               />
                               <span className="text-muted-foreground text-sm">%</span>
                             </div>

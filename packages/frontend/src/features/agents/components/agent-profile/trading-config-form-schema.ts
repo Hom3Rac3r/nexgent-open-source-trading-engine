@@ -14,6 +14,7 @@ import {
   staleTradeSchema,
   dcaSchema,
   takeProfitConfigSchema,
+  autoTradeSchema,
 } from '@nexgent/shared';
 
 /**
@@ -30,6 +31,7 @@ export const agentTradingConfigSchema = z.object({
   staleTrade: staleTradeSchema,
   dca: dcaSchema,
   takeProfit: takeProfitConfigSchema,
+  autoTrade: autoTradeSchema.optional(),
 });
 
 /**
