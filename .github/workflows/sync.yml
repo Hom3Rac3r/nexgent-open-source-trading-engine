@@ -5,7 +5,6 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
-# 이 부분이 핵심입니다! 강제로 권한을 부여합니다.
 permissions:
   contents: write
 
@@ -24,5 +23,6 @@ jobs:
           git config --global user.email 'actions@github.com'
           git remote add upstream https://github.com/nexgent-ai-org/nexgent-open-source-trading-engine.git
           git fetch upstream
-          git merge upstream/main
+          # 아래 줄에 --allow-unrelated-histories 를 추가하여 강제로 합칩니다.
+          git merge upstream/main --allow-unrelated-histories -m "Sync with upstream"
           git push origin main
