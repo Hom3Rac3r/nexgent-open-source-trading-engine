@@ -2,8 +2,12 @@ name: Sync Fork
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 매일 자정에 자동으로 실행됩니다.
-  workflow_dispatch: # 내가 원할 때 수동으로 버튼을 눌러 실행할 수 있습니다.
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+# 이 부분이 핵심입니다! 강제로 권한을 부여합니다.
+permissions:
+  contents: write
 
 jobs:
   sync:
@@ -12,16 +16,13 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v3
         with:
-          ref: main # 내 포크 저장소의 기본 브랜치 이름
+          ref: main
 
       - name: Sync upstream
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
-          # 원본 저장소를 'upstream'이라는 이름으로 등록합니다.
           git remote add upstream https://github.com/nexgent-ai-org/nexgent-open-source-trading-engine.git
           git fetch upstream
-          # 원본의 main 브랜치 내용을 내 저장소로 합칩니다.
           git merge upstream/main
-          # 내 저장소(origin)로 업데이트된 내용을 밀어넣습니다.
           git push origin main
