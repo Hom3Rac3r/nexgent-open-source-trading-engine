@@ -8,6 +8,7 @@
 
 import { redisService } from './redis-client.js';
 import { REDIS_KEYS } from '@/shared/constants/redis-keys.js';
+import logger from '@/infrastructure/logging/logger.js';
 import type { AgentPosition } from '@prisma/client';
 
 /** Convert a value (e.g. Prisma Decimal) to a JSON-safe number for Redis storage */
@@ -83,7 +84,7 @@ export class RedisPositionService {
         lastTakeProfitTime: position.lastTakeProfitTime ? new Date(position.lastTakeProfitTime) : null,
       };
     } catch (error) {
-      console.error(`Failed to parse cached position ${id}:`, error);
+      logger.error({ positionId: id, error: error instanceof Error ? error.message : String(error) }, 'Failed to parse cached position');
       return null;
     }
   }
@@ -132,7 +133,7 @@ export class RedisPositionService {
     // Only log if position was actually added to at least one index
     // This prevents log spam when position is updated but already indexed
     if (agentAdded > 0 || tokenAdded > 0) {
-      console.log(`[RedisPositionService] ✅ Added position ${position.id} to indexes: agent=${position.agentId}, token=${position.tokenAddress.toLowerCase()}`);
+      logger.debug({ positionId: position.id, agentId: position.agentId, tokenAddress: position.tokenAddress.toLowerCase() }, 'Added position to Redis indexes');
     }
   }
 
@@ -219,7 +220,7 @@ export class RedisPositionService {
             await client.del(tokenKey);
           }
         } catch (error) {
-          console.error(`[RedisPositionService] Failed to parse position ${positionId} during cleanup:`, error);
+          logger.error({ positionId, agentId, error: error instanceof Error ? error.message : String(error) }, 'Failed to parse position during cleanup');
         }
       }
       
@@ -230,7 +231,72 @@ export class RedisPositionService {
     // Delete agent index
     await client.del(agentKey);
     
-    console.log(`[RedisPositionService] ✅ Deleted ${positionIds.length} position(s) for agent ${agentId}`);
+    logger.info({ agentId, deletedCount: positionIds.length }, 'Deleted agent positions from Redis');
+  }
+
+  /**
+   * Delete all cached positions for a specific wallet under an agent.
+   *
+   * This method is resilient to stale Redis state:
+   * - Removes index entries that reference missing position payloads
+   * - Removes malformed position payloads
+   * - Removes all positions whose walletAddress matches the target wallet
+   *
+   * @param agentId - Agent ID
+   * @param walletAddress - Wallet address to purge
+   * @returns Number of removed position payload keys
+   */
+  public async deleteWalletPositions(agentId: string, walletAddress: string): Promise<number> {
+    const client = redisService.getClient();
+    const agentKey = REDIS_KEYS.AGENT_POSITIONS(agentId);
+    const positionIds = await client.smembers(agentKey);
+    let deletedCount = 0;
+
+    for (const positionId of positionIds) {
+      const positionKey = REDIS_KEYS.POSITION(positionId);
+      const positionData = await redisService.get(positionKey);
+
+      // Stale agent index entry (position payload missing) - remove from index.
+      if (!positionData) {
+        await client.srem(agentKey, positionId);
+        continue;
+      }
+
+      try {
+        const position = JSON.parse(positionData) as { walletAddress?: string; tokenAddress?: string };
+
+        if (position.walletAddress !== walletAddress) {
+          continue;
+        }
+
+        // Delete payload and unlink from both indexes.
+        await redisService.del(positionKey);
+        await client.srem(agentKey, positionId);
+
+        if (position.tokenAddress) {
+          const tokenKey = REDIS_KEYS.TOKEN_POSITIONS(String(position.tokenAddress).toLowerCase());
+          await client.srem(tokenKey, positionId);
+          const tokenSetSize = await client.scard(tokenKey);
+          if (tokenSetSize === 0) {
+            await client.del(tokenKey);
+          }
+        }
+
+        deletedCount++;
+      } catch {
+        // Malformed payload: delete payload and drop index reference.
+        await redisService.del(positionKey);
+        await client.srem(agentKey, positionId);
+        deletedCount++;
+      }
+    }
+
+    const agentSetSize = await client.scard(agentKey);
+    if (agentSetSize === 0) {
+      await client.del(agentKey);
+    }
+
+    return deletedCount;
   }
 }
 

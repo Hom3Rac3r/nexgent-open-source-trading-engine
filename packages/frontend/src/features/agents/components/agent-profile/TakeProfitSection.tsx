@@ -9,7 +9,7 @@ import {
   FormMessage,
   FormDescription,
 } from '@/shared/components/ui/form';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   Tooltip,
   TooltipContent,
@@ -169,19 +169,10 @@ export function TakeProfitSection() {
                             <FormLabel>Trigger At</FormLabel>
                             <FormControl>
                               <div className="flex items-center gap-1">
-                                <Input
-                                  {...field}
-                                  type="number"
-                                  step="10"
-                                  min="1"
-                                  max="10000"
-                                  className="max-w-[120px]"
-                                  placeholder="300"
-                                  onChange={(e) => {
-                                    const numValue = parseFloat(e.target.value);
-                                    if (!isNaN(numValue)) field.onChange(numValue);
-                                  }}
+                                <NumericInput
                                   value={field.value}
+                                  onChange={(v) => field.onChange(v)}
+                                  className="max-w-[120px]"
                                 />
                                 <span className="text-muted-foreground text-sm">% gain</span>
                               </div>
@@ -201,19 +192,10 @@ export function TakeProfitSection() {
                             <FormLabel>Retain Amount</FormLabel>
                             <FormControl>
                               <div className="flex items-center gap-1">
-                                <Input
-                                  {...field}
-                                  type="number"
-                                  step="1"
-                                  min="1"
-                                  max="50"
-                                  className="max-w-[120px]"
-                                  placeholder="10"
-                                  onChange={(e) => {
-                                    const numValue = parseFloat(e.target.value);
-                                    if (!isNaN(numValue)) field.onChange(numValue);
-                                  }}
+                                <NumericInput
                                   value={field.value}
+                                  onChange={(v) => field.onChange(v)}
+                                  className="max-w-[120px]"
                                 />
                                 <span className="text-muted-foreground text-sm">%</span>
                               </div>

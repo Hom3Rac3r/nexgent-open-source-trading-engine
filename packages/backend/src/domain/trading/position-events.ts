@@ -27,7 +27,15 @@ export interface PositionClosedEvent {
   agentId: string;
   walletAddress: string;
   positionId: string;
-  tokenAddress: string; // Added for price update manager tracking
+  tokenAddress: string;
+  /** Token symbol; used by auto-trade re-entry execution context/logging */
+  tokenSymbol?: string;
+  /**
+   * Event source context.
+   * - 'wallet_reset' is emitted by wallet reset flow to trigger cleanup listeners only.
+   * - 'trading' is emitted by normal position lifecycle (manual/TP/SL/stale close).
+   */
+  source?: 'wallet_reset' | 'trading';
 }
 
 /**

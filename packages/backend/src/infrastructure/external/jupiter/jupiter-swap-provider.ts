@@ -127,6 +127,9 @@ export class JupiterSwapProvider extends BaseSwapProvider {
     url.searchParams.set('inputMint', request.inputMint);
     url.searchParams.set('outputMint', request.outputMint);
     url.searchParams.set('amount', request.amount.toString());
+    // Reduce pathological routes through illiquid intermediary tokens/pools.
+    // This improves quote safety for thin or manipulated markets.
+    url.searchParams.set('restrictIntermediateTokens', 'true');
 
     if (request.walletAddress) {
       url.searchParams.set('taker', request.walletAddress);

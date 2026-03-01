@@ -96,13 +96,25 @@ class DCAManager {
       }
     }
 
-    // Check max DCA count
-    if (position.dcaCount >= config.dca.maxDCACount) {
+    // Get DCA levels first so we know the effective cap (max DCAs = number of levels)
+    const levels = this.getDCALevels(config.dca);
+
+    if (levels.length === 0) {
       return {
         shouldTrigger: false,
         triggerLevel: null,
         buyAmountSol: null,
-        reason: `Max DCA count reached (${position.dcaCount}/${config.dca.maxDCACount})`,
+        reason: 'No DCA levels configured',
+      };
+    }
+
+    // Cap is the number of levels — no separate maxDCACount
+    if (position.dcaCount >= levels.length) {
+      return {
+        shouldTrigger: false,
+        triggerLevel: null,
+        buyAmountSol: null,
+        reason: `All DCA levels used (${position.dcaCount}/${levels.length})`,
       };
     }
 
@@ -122,18 +134,6 @@ class DCAManager {
       }
     }
 
-    // Get DCA levels (from template or custom)
-    const levels = this.getDCALevels(config.dca);
-
-    if (levels.length === 0) {
-      return {
-        shouldTrigger: false,
-        triggerLevel: null,
-        buyAmountSol: null,
-        reason: 'No DCA levels configured',
-      };
-    }
-
     // Calculate drop percentage from average purchase price
     const avgPrice = position.purchasePrice;
     const dropPercent = ((currentPrice - avgPrice) / avgPrice) * 100;
@@ -146,7 +146,6 @@ class DCAManager {
       avgPrice,
       dropPercent: dropPercent.toFixed(2),
       dcaCount: position.dcaCount,
-      maxDcaCount: config.dca.maxDCACount,
       levelsCount: levels.length,
     }, 'DCA evaluation started');
 

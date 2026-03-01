@@ -12,9 +12,91 @@ import { Response } from 'express';
 import { prisma } from '@/infrastructure/database/client.js';
 import { configService, ConfigServiceError } from '@/domain/trading/config-service.js';
 import { agentService, AgentServiceError } from '@/domain/agents/agent-service.js';
+import { tradingExecutor, TradingExecutorError } from '@/domain/trading/trading-executor.service.js';
 import type { AuthenticatedRequest } from '@/middleware/auth.js';
 import type { UpdateTradingConfigRequest, TradingConfigResponse } from './types.js';
+import logger from '@/infrastructure/logging/logger.js';
+import {
+  AUTO_TRADE_SIGNAL_TYPE,
+  AUTO_TRADE_SIGNAL_SOURCE,
+} from '@/domain/trading/auto-trade-constants.js';
 import type { AgentTradingConfig } from '@nexgent/shared';
+
+/** Minimal token shape returned by {@link getImmediateAutoTradeTokens}. */
+type AutoTradeToken = {
+  address: string;
+  symbol?: string;
+  enabled: boolean;
+};
+
+/**
+ * Create a synthetic signal for immediate auto-trade purchases triggered by config save.
+ *
+ * These purchases bypass the normal signal pipeline, so we persist a signal record
+ * to keep downstream transaction linking (DCA/take-profit/history) consistent.
+ */
+async function createImmediateAutoTradeSignal(params: {
+  userId: string;
+  tokenAddress: string;
+  tokenSymbol?: string;
+}): Promise<number | null> {
+  try {
+    const signal = await prisma.tradingSignal.create({
+      data: {
+        tokenAddress: params.tokenAddress.trim(),
+        symbol: params.tokenSymbol?.trim() || null,
+        signalType: AUTO_TRADE_SIGNAL_TYPE,
+        activationReason: 'Auto-trade immediate buy after config save',
+        signalStrength: 3,
+        source: AUTO_TRADE_SIGNAL_SOURCE,
+        userId: params.userId,
+      },
+    });
+
+    return signal.id;
+  } catch (error) {
+    logger.warn(
+      { tokenAddress: params.tokenAddress, error: error instanceof Error ? error.message : String(error) },
+      'Auto-trade immediate signal creation failed'
+    );
+    return null;
+  }
+}
+
+/**
+ * Determine which tokens should be purchased immediately after config save.
+ *
+ * Rules:
+ * - If global auto-trade transitions off -> on, buy all currently enabled tokens.
+ * - If global auto-trade stays on, buy only newly enabled tokens.
+ * - If global auto-trade is off after update, buy nothing.
+ */
+function getImmediateAutoTradeTokens(
+  previousConfig: AgentTradingConfig,
+  nextConfig: AgentTradingConfig,
+): AutoTradeToken[] {
+  const previousAutoTrade = previousConfig.autoTrade;
+  const nextAutoTrade = nextConfig.autoTrade;
+
+  if (!nextAutoTrade?.enabled) return [];
+
+  const previousEnabled = previousAutoTrade?.enabled ?? false;
+  const previousEnabledSet = new Set(
+    (previousAutoTrade?.tokens ?? [])
+      .filter((token) => token.enabled)
+      .map((token) => token.address.trim().toLowerCase()),
+  );
+
+  const nextEnabledTokens = (nextAutoTrade.tokens ?? []).filter((token) => token.enabled);
+
+  if (!previousEnabled) {
+    return nextEnabledTokens;
+  }
+
+  return nextEnabledTokens.filter(
+    (token) => !previousEnabledSet.has(token.address.trim().toLowerCase()),
+  );
+}
 
 /**
  * Update trading configuration for an agent
@@ -68,13 +150,14 @@ export async function updateAgentTradingConfig(req: AuthenticatedRequest, res: R
     }
 
     let finalConfig: AgentTradingConfig | null = null;
+    let existingConfig: AgentTradingConfig | null = null;
 
     if (partialConfig === null) {
       // Reset to defaults
       finalConfig = null;
     } else {
       // Load existing config (already merged with defaults)
-      const existingConfig = await configService.loadAgentConfig(id);
+      existingConfig = await configService.loadAgentConfig(id);
       
       // Deep merge partial config with existing config
       finalConfig = configService.mergeConfigs(existingConfig, partialConfig);
@@ -92,13 +175,49 @@ export async function updateAgentTradingConfig(req: AuthenticatedRequest, res: R
     // Update configuration (service handles DB save and cache invalidation)
     const updatedConfig = await agentService.updateAgentConfig(id, finalConfig);
 
+    // Trigger immediate auto-trade purchases when auto-trade is switched on
+    // or when new token tiles are switched on while global auto-trade is already on.
+    if (finalConfig !== null && existingConfig) {
+      const immediateTokens = getImmediateAutoTradeTokens(existingConfig, updatedConfig);
+
+      for (const token of immediateTokens) {
+        try {
+          const signalId = await createImmediateAutoTradeSignal({
+            userId: req.user.id,
+            tokenAddress: token.address,
+            tokenSymbol: token.symbol,
+          });
+
+          await tradingExecutor.executePurchase({
+            agentId: id,
+            tokenAddress: token.address.trim(),
+            tokenSymbol: token.symbol?.trim(),
+            signalId: signalId ?? undefined,
+          });
+        } catch (error) {
+          // Config update must not fail if immediate purchase is skipped or fails.
+          if (error instanceof TradingExecutorError) {
+            logger.warn(
+              { agentId: id, tokenAddress: token.address, code: error.code, message: error.message },
+              'Auto-trade immediate purchase skipped/failed'
+            );
+          } else {
+            logger.warn(
+              { agentId: id, tokenAddress: token.address, error: error instanceof Error ? error.message : String(error) },
+              'Auto-trade immediate purchase failed with unexpected error'
+            );
+          }
+        }
+      }
+    }
+
     const response: TradingConfigResponse = {
       config: updatedConfig,
     };
 
     res.json(response);
   } catch (error) {
-    console.error('Update agent trading config error:', error);
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Update agent trading config error');
     
     // Handle service errors
     if (error instanceof AgentServiceError) {

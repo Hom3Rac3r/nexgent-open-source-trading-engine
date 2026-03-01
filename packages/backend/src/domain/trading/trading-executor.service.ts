@@ -354,6 +354,7 @@ class TradingExecutor {
       const maxRetries = 3;
       const retryMultipliers = [0.9, 0.8, 0.7]; // 90%, 80%, 70%
       const MINIMUM_VIABLE_PURCHASE = 0.01; // Minimum SOL amount for retry
+      const RETRY_DELAY_MS = 5000; // Delay between price-impact retries to allow liquidity to settle
 
       // Check price impact (slippage) if threshold is set
       // Note: Jupiter returns price impact as negative (e.g., -5% means 5% slippage)
@@ -376,9 +377,12 @@ class TradingExecutor {
             initialAmount: positionSize,
           }, 'Price impact (slippage) exceeds threshold, attempting retry with reduced amount');
 
-          // Retry with reduced amounts
+          // Retry with reduced amounts (with delay between retries to allow liquidity to settle)
           let retrySuccessful = false;
           for (let i = 0; i < maxRetries; i++) {
+            if (i > 0) {
+              await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+            }
             const retryMultiplier = retryMultipliers[i];
             const retryAmount = positionSize * retryMultiplier;
             const retryAmountLamports = Math.floor(retryAmount * 1e9);
@@ -763,6 +767,37 @@ class TradingExecutor {
         }
 
         errorCount.inc({ type: 'trading', code: tradingError.code || 'VALIDATION_FAILED' });
+        throw tradingError;
+      }
+
+      // Handle balance update failures (e.g. wallet reset removed SOL balance row)
+      // as expected insufficient-balance outcomes so automation can skip gracefully.
+      if (typeof BalanceError === 'function' && error instanceof BalanceError) {
+        const isMissingBalance = error.message.includes('Balance not found');
+        const tradingError = new TradingExecutorError(
+          isMissingBalance
+            ? 'Insufficient SOL balance: balance record missing (wallet may have been reset)'
+            : error.message,
+          'INSUFFICIENT_BALANCE',
+          {
+            currentBalance: error.currentBalance,
+            requiredAmount: error.requiredAmount,
+            tokenAddress: error.tokenAddress,
+            tokenSymbol: error.tokenSymbol,
+            isMissingBalance,
+          }
+        );
+
+        logger.warn({
+          agentId: request.agentId,
+          tokenAddress: request.tokenAddress,
+          walletAddress: request.walletAddress,
+          error: tradingError.message,
+          code: tradingError.code,
+          duration,
+        }, 'Purchase skipped: insufficient balance state');
+
+        errorCount.inc({ type: 'trading', code: tradingError.code || 'INSUFFICIENT_BALANCE' });
         throw tradingError;
       }
 
@@ -1256,12 +1291,12 @@ class TradingExecutor {
       // Delete position from Redis cache
       await redisPositionService.deletePosition(position);
 
-      // Emit position closed event (after transaction completes)
       positionEventEmitter.emitPositionClosed({
         agentId: request.agentId,
         walletAddress,
         positionId: request.positionId,
         tokenAddress,
+        tokenSymbol: position.tokenSymbol,
       });
 
       // Record metrics and log
@@ -1584,6 +1619,18 @@ class TradingExecutor {
           newTokensAcquired: outputAmountTokens,
           configTpLevelsCount,
         }
+      );
+
+      // Re-initialize stop-loss from the new cost basis.
+      // DCA lowers purchasePrice (weighted average) while peakPrice stays at the old
+      // high. This creates a phantom "gain" (peakPrice >> purchasePrice) that can
+      // tighten the trailing stop-loss above the current market price, triggering an
+      // immediate sell. Resetting peakPrice and currentStopLossPercentage to match the
+      // new cost basis prevents this. (see: github issue #32)
+      await stopLossManager.initializeStopLoss(
+        request.positionId,
+        newAveragePrice,
+        agentConfig
       );
 
       // Step 8: Update Redis caches for balances

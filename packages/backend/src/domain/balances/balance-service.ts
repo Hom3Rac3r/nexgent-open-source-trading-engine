@@ -289,11 +289,17 @@ export class BalanceService {
         }
       }
 
-      // Write-Through: Update DB first (source of truth)
-      const dbBalance = await this.balanceRepo.update(existingBalance.id, {
-        balance: newBalance.toString(),
-        tokenSymbol: tokenSymbol,
-      }, tx);
+      // Write-Through: Persist by unique wallet+token key instead of cached row ID.
+      // This prevents P2025 failures when Redis has a stale balance ID after wallet reset
+      // or concurrent delete/recreate flows.
+      const dbBalance = await this.balanceRepo.upsert(
+        walletAddress,
+        agentId,
+        tokenAddress,
+        tokenSymbol,
+        newBalance.toString(),
+        tx
+      );
 
       // Update Redis cache (only if not in transaction - if in transaction, caller updates after commit)
       if (!tx) {

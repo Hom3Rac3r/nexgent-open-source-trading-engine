@@ -9,7 +9,7 @@ import {
   FormMessage,
   FormDescription,
 } from '@/shared/components/ui/form';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   Tooltip,
   TooltipContent,
@@ -102,15 +102,11 @@ export function StaleTradeSection() {
                     </TooltipProvider>
                   </div>
                   <FormControl>
-                    <Input
-                      {...field}
-                      type="number"
-                      step="1"
-                      min="1"
-                      placeholder="60"
-                      className="max-w-[150px]"
-                      onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                    <NumericInput
                       value={field.value}
+                      onChange={(v) => field.onChange(v)}
+                      inputMode="numeric"
+                      className="max-w-[150px]"
                     />
                   </FormControl>
                   <FormDescription>
@@ -161,29 +157,9 @@ export function StaleTradeSection() {
                         </TooltipProvider>
                       </div>
                       <FormControl>
-                        <Input
-                          {...field}
-                          type="number"
-                          step="0.5"
-                          placeholder="1"
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (value === '' || value === '-') {
-                              field.onChange(value);
-                            } else {
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue)) {
-                                field.onChange(numValue);
-                              }
-                            }
-                          }}
-                          onBlur={(e) => {
-                            const value = e.target.value;
-                            if (value === '' || value === '-') {
-                              field.onChange(1);
-                            }
-                          }}
-                          value={field.value ?? ''}
+                        <NumericInput
+                          value={field.value}
+                          onChange={(v) => field.onChange(v)}
                         />
                       </FormControl>
                       <FormMessage />
@@ -221,29 +197,9 @@ export function StaleTradeSection() {
                         </TooltipProvider>
                       </div>
                       <FormControl>
-                        <Input
-                          {...field}
-                          type="number"
-                          step="0.5"
-                          placeholder="10"
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (value === '' || value === '-') {
-                              field.onChange(value);
-                            } else {
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue)) {
-                                field.onChange(numValue);
-                              }
-                            }
-                          }}
-                          onBlur={(e) => {
-                            const value = e.target.value;
-                            if (value === '' || value === '-') {
-                              field.onChange(10);
-                            }
-                          }}
-                          value={field.value ?? ''}
+                        <NumericInput
+                          value={field.value}
+                          onChange={(v) => field.onChange(v)}
                         />
                       </FormControl>
                       <FormMessage />

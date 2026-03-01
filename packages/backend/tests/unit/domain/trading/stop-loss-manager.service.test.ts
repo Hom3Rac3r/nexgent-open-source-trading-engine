@@ -395,6 +395,63 @@ describe('StopLossManager', () => {
       expect(result.shouldTrigger).toBe(true); // <= should trigger
     });
 
+    it('should not trigger after DCA re-initializes stop-loss with new cost basis (issue #32)', async () => {
+      // Regression test: after multiple DCA buys, purchasePrice drops while peakPrice
+      // stays at the original high. This creates a phantom "gain" that tightens the
+      // trailing stop-loss above the current market price, causing an immediate sell.
+      //
+      // Scenario: 3 DCA buys at -10% each (aggressive mode, 100% buy)
+      //   Original buy at P, peakPrice = P
+      //   After 3 DCAs, purchasePrice ≈ 0.0805P, peakPrice still P
+      //   peakChangePercent = ((P - 0.0805P) / 0.0805P) * 100 ≈ 24.2%
+      //   Fixed-stepper: 24.2 >= 20 → stopLoss = max(0, 24.2-10) = 14.2%
+      //   stopLossPrice = 0.0805P * 1.142 ≈ 0.092P — above market price of 0.073P!
+      //
+      // Fix: after DCA, initializeStopLoss resets peakPrice to new purchasePrice.
+
+      // --- Part A: Demonstrate the bug (stale peakPrice → phantom gain → immediate trigger) ---
+      const stalePosition = createMockPosition({
+        purchasePrice: 0.0000805,   // New weighted avg after 3 DCAs
+        currentStopLossPercentage: -50,
+        peakPrice: 0.0001,          // Still at original purchase price (stale!)
+      });
+      mockPositionService.getPositionById.mockResolvedValue(stalePosition);
+      const marketPrice = 0.000073;
+
+      const fixedConfig = createMockConfig({
+        stopLoss: {
+          enabled: true,
+          defaultPercentage: -50,
+          trailingLevels: [],
+          mode: 'fixed' as const,
+        },
+      });
+
+      const bugResult = await stopLossManager.evaluateStopLoss(stalePosition, marketPrice, fixedConfig);
+      // With stale peakPrice, the phantom 24% gain tightens the stop-loss and triggers
+      expect(bugResult.shouldTrigger).toBe(true);
+
+      // --- Part B: After fix (peakPrice reset to new purchasePrice via initializeStopLoss) ---
+      jest.clearAllMocks();
+      const { redisService } = await import('@/infrastructure/cache/redis-client.js');
+      (redisService.acquireLock as jest.Mock).mockResolvedValue('mock-lock-token');
+      (redisService.releaseLock as jest.Mock).mockResolvedValue(undefined);
+
+      const fixedPosition = createMockPosition({
+        purchasePrice: 0.0000805,
+        currentStopLossPercentage: -50,  // Reset to default by initializeStopLoss
+        peakPrice: 0.0000805,            // Reset to new purchasePrice by initializeStopLoss
+      });
+      mockPositionService.getPositionById.mockResolvedValue(fixedPosition);
+      mockPositionService.updatePosition.mockResolvedValue(undefined);
+
+      const fixedResult = await stopLossManager.evaluateStopLoss(fixedPosition, marketPrice, fixedConfig);
+      // With reset peakPrice, stop-loss price = 0.0000805 * 0.5 = 0.00004025
+      // Market price 0.000073 > 0.00004025 → no trigger
+      expect(fixedResult.shouldTrigger).toBe(false);
+      expect(fixedResult.stopLossPrice).toBeCloseTo(0.0000805 * 0.5, 10);
+    });
+
     it('should load config from Redis if not provided', async () => {
       // Arrange
       const position = createMockPosition({ purchasePrice: 100 });

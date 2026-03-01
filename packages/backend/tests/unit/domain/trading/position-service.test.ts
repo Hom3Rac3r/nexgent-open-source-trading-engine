@@ -697,6 +697,7 @@ describe('PositionService', () => {
         walletAddress: 'wallet-123',
         positionId,
         tokenAddress: 'Token1111111111111111111111111111111111111111',
+        tokenSymbol: 'TEST',
       });
       expect(mockQueueAdd).not.toHaveBeenCalled(); // No queue job in write-through
     });
