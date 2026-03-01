@@ -452,7 +452,7 @@ class PositionService {
     }
 
     // Store position info before deletion for event
-    const { agentId, walletAddress, tokenAddress } = position;
+    const { agentId, walletAddress, tokenAddress, tokenSymbol } = position;
 
     // Write-Through: Delete from DB first (source of truth)
     await this.positionRepo.delete(positionId);
@@ -460,12 +460,12 @@ class PositionService {
     // Then delete from Redis cache
     await redisPositionService.deletePosition(position);
 
-    // Emit position closed event
     positionEventEmitter.emitPositionClosed({
       agentId,
       walletAddress,
       positionId,
       tokenAddress,
+      tokenSymbol: tokenSymbol ?? undefined,
     });
   }
 

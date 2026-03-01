@@ -2,7 +2,7 @@
  * Jupiter Token Metrics Service Unit Tests
  */
 
-import { fetchTokenMetrics } from '@/infrastructure/external/jupiter/jupiter-token-metrics.service.js';
+import { fetchTokenMetrics, clearTokenMetricsCache } from '@/infrastructure/external/jupiter/jupiter-token-metrics.service.js';
 
 const originalEnv = process.env;
 
@@ -11,6 +11,7 @@ describe('fetchTokenMetrics', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    clearTokenMetricsCache();
     process.env = { ...originalEnv, JUPITER_API_KEY: 'test-api-key' };
     (global as any).fetch = jest.fn();
   });

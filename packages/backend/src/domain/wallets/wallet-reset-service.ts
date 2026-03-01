@@ -15,6 +15,7 @@ import { prisma } from '@/infrastructure/database/client.js';
 import { positionEventEmitter } from '../trading/position-events.js';
 import { REDIS_KEYS } from '@/shared/constants/redis-keys.js';
 import { redisService } from '@/infrastructure/cache/redis-client.js';
+import { redisPositionService } from '@/infrastructure/cache/redis-position-service.js';
 import logger from '@/infrastructure/logging/logger.js';
 
 /**
@@ -122,6 +123,11 @@ class WalletResetService {
       // This prevents stale cache reads during the reset
       const cacheResult = await this.clearRedisCache(agentId, walletAddress, positions, balances);
 
+      // Step 2b: Force-purge wallet positions from Redis indexes/payloads.
+      // This handles stale Redis entries that are no longer present in DB and would
+      // otherwise survive reset because we only loaded current DB positions above.
+      const forceDeletedRedisPositions = await redisPositionService.deleteWalletPositions(agentId, walletAddress);
+
       // Step 3: Emit position_closed events for each position
       // This triggers PriceUpdateManager to remove agent from token tracking
       for (const position of positions) {
@@ -130,6 +136,7 @@ class WalletResetService {
           walletAddress: position.walletAddress,
           positionId: position.id,
           tokenAddress: position.tokenAddress,
+          source: 'wallet_reset',
         });
       }
 
@@ -187,6 +194,7 @@ class WalletResetService {
         agentId,
         deleted: dbResult,
         clearedCache: cacheResult,
+        forceDeletedRedisPositions,
         duration,
       }, 'Wallet reset completed successfully');
 

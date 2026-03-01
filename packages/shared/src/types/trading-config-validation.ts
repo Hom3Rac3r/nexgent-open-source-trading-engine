@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { MINIMUM_POSITION_SIZE_SOL } from '../constants/trading-config-defaults.js';
 
 /**
  * Trailing level validation schema
@@ -77,21 +78,21 @@ export const purchaseLimitsSchema = z.object({
   maxPriceImpact: z.number()
     .min(0, 'Price impact must be between 0 and 1')
     .max(1, 'Price impact must be between 0 and 1')
-    .optional()
-    .describe('Maximum acceptable price impact percentage (0-1, e.g., 0.05 = 5%). If not set, price impact checking is disabled.'),
+    .describe('Maximum acceptable price impact percentage (0-1, e.g., 0.05 = 5%). Required.'),
 });
 
 /**
- * Position size range validation schema
+ * Position size range validation schema.
+ * Enforces a hard floor of MINIMUM_POSITION_SIZE_SOL to prevent dust-sized trades.
  */
 export const positionSizeRangeSchema = z.object({
   min: z.number()
-    .nonnegative('Minimum position size must be >= 0'),
+    .min(MINIMUM_POSITION_SIZE_SOL, `Minimum purchase size is ${MINIMUM_POSITION_SIZE_SOL} SOL`),
   max: z.number()
-    .nonnegative('Maximum position size must be >= 0'),
+    .min(MINIMUM_POSITION_SIZE_SOL, `Minimum purchase size is ${MINIMUM_POSITION_SIZE_SOL} SOL`),
 }).refine(
   (data) => data.min <= data.max,
-  { message: 'Minimum position size must be <= maximum position size' }
+  { message: 'Max must be greater than or equal to min', path: ['max'] }
 );
 
 /**
@@ -342,6 +343,50 @@ export const takeProfitConfigSchema = z.object({
 });
 
 /**
+ * Auto-trade (whitelist) validation schema
+ * Only tokens in `tokens` with `enabled: true` are re-bought when a position closes.
+ */
+export const autoTradeTokenSchema = z.object({
+  address: z.string().min(32, 'Token address too short').max(44, 'Token address too long'),
+  symbol: z.string().min(1).max(20).optional(),
+  logoUrl: z.string().url('Invalid token image URL').optional(),
+  enabled: z.boolean().default(false),
+  marketCapMin: optionalPositiveNumber.describe('Per-token auto-trade minimum market cap (USD)'),
+  marketCapMax: optionalPositiveNumber.describe('Per-token auto-trade maximum market cap (USD)'),
+}).strip().superRefine((data, ctx) => {
+  if (data.marketCapMin != null && data.marketCapMax != null && data.marketCapMin > data.marketCapMax) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Auto-trade minimum market cap must be ≤ maximum',
+      path: ['marketCapMax'],
+    });
+  }
+});
+
+export const autoTradeSchema = z.object({
+  enabled: z.boolean().describe('Whether auto-trade is on for this agent'),
+  tokens: z
+    .array(autoTradeTokenSchema)
+    .max(100, 'Maximum 100 tokens in auto-trade list')
+    .default([])
+    .describe('Token mint addresses with per-token enabled state and optional market-cap bounds'),
+}).strip().superRefine((data, ctx) => {
+  const seen = new Set<string>();
+  data.tokens.forEach((token, index) => {
+    const key = token.address.trim().toLowerCase();
+    if (seen.has(key)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Duplicate token address in auto-trade list',
+        path: ['tokens', index, 'address'],
+      });
+      return;
+    }
+    seen.add(key);
+  });
+});
+
+/**
  * Complete agent trading configuration validation schema
  * 
  * Uses .strip() to automatically remove unknown fields (like old continuousTrailing).
@@ -355,6 +400,7 @@ export const agentTradingConfigSchema = z.object({
   staleTrade: staleTradeSchema,
   dca: dcaSchema,
   takeProfit: takeProfitConfigSchema,
+  autoTrade: autoTradeSchema.optional(),
 }).strip();
 
 /**

@@ -11,7 +11,7 @@ import {
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { AgentTradingConfigFormValues } from './trading-config-form-schema';
 import type { UseFormReturn } from 'react-hook-form';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   Tooltip,
   TooltipContent,
@@ -53,14 +53,9 @@ function PositionCalculatorForm({ form }: { form: UseFormReturn<AgentTradingConf
               <FormItem>
                 <FormLabel>Small from (SOL)</FormLabel>
                 <FormControl>
-                  <Input
-                    {...field}
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    placeholder="0.2"
-                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                  <NumericInput
                     value={field.value}
+                    onChange={(v) => field.onChange(v)}
                   />
                 </FormControl>
                 <FormMessage />
@@ -74,14 +69,9 @@ function PositionCalculatorForm({ form }: { form: UseFormReturn<AgentTradingConf
               <FormItem>
                 <FormLabel>Medium from (SOL)</FormLabel>
                 <FormControl>
-                  <Input
-                    {...field}
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    placeholder="5.0"
-                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                  <NumericInput
                     value={field.value}
+                    onChange={(v) => field.onChange(v)}
                   />
                 </FormControl>
                 <FormMessage />
@@ -95,14 +85,9 @@ function PositionCalculatorForm({ form }: { form: UseFormReturn<AgentTradingConf
               <FormItem>
                 <FormLabel>Large from (SOL)</FormLabel>
                 <FormControl>
-                  <Input
-                    {...field}
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    placeholder="10.0"
-                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                  <NumericInput
                     value={field.value}
+                    onChange={(v) => field.onChange(v)}
                   />
                 </FormControl>
                 <FormMessage />
@@ -133,27 +118,9 @@ function PositionCalculatorForm({ form }: { form: UseFormReturn<AgentTradingConf
       <div className="space-y-3">
         <h4 className="text-sm font-medium">Position size (min/max SOL) per range</h4>
         <div className="grid gap-4">
-          <CategoryRow
-            form={form}
-            category="small"
-            rangeLabel={`When balance: ${smallRange} SOL`}
-            minPlaceholder="0.1"
-            maxPlaceholder="0.2"
-          />
-          <CategoryRow
-            form={form}
-            category="medium"
-            rangeLabel={`When balance: ${mediumRange} SOL`}
-            minPlaceholder="0.5"
-            maxPlaceholder="1.0"
-          />
-          <CategoryRow
-            form={form}
-            category="large"
-            rangeLabel={`When balance: ${largeRange} SOL`}
-            minPlaceholder="1.5"
-            maxPlaceholder="2.0"
-          />
+          <CategoryRow form={form} category="small" rangeLabel={`When balance: ${smallRange} SOL`} />
+          <CategoryRow form={form} category="medium" rangeLabel={`When balance: ${mediumRange} SOL`} />
+          <CategoryRow form={form} category="large" rangeLabel={`When balance: ${largeRange} SOL`} />
         </div>
       </div>
     </div>
@@ -164,17 +131,14 @@ function CategoryRow({
   form,
   category,
   rangeLabel,
-  minPlaceholder,
-  maxPlaceholder,
 }: {
   form: UseFormReturn<AgentTradingConfigFormValues>;
   category: 'small' | 'medium' | 'large';
   rangeLabel: string;
-  minPlaceholder: string;
-  maxPlaceholder: string;
 }) {
   const { errors } = form.formState;
-  const sizeErrorMessage = errors.positionCalculator?.positionSizes?.[category]?.message;
+  const categoryErrors = errors.positionCalculator?.positionSizes?.[category];
+  const sizeErrorMessage = categoryErrors?.message ?? categoryErrors?.root?.message;
 
   return (
     <div className="grid gap-4 md:grid-cols-3 border rounded-lg p-4 items-center">
@@ -189,14 +153,9 @@ function CategoryRow({
           <FormItem>
             <FormLabel className="text-xs">Min (SOL)</FormLabel>
             <FormControl>
-              <Input
-                {...field}
-                type="number"
-                step="0.1"
-                min="0"
-                placeholder={minPlaceholder}
-                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+              <NumericInput
                 value={field.value}
+                onChange={(v) => field.onChange(v)}
               />
             </FormControl>
             <FormMessage />
@@ -210,14 +169,9 @@ function CategoryRow({
           <FormItem>
             <FormLabel className="text-xs">Max (SOL)</FormLabel>
             <FormControl>
-              <Input
-                {...field}
-                type="number"
-                step="0.1"
-                min="0"
-                placeholder={maxPlaceholder}
-                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+              <NumericInput
                 value={field.value}
+                onChange={(v) => field.onChange(v)}
               />
             </FormControl>
             <FormMessage />
@@ -257,7 +211,7 @@ export function PurchaseAndPositionSection() {
             <AlertDescription className="text-sm">
               Slippage occurs when your trade size is large compared to available liquidity, causing you to
               receive fewer tokens than expected. If a swap quote exceeds this threshold, the system will
-              retry with a smaller amount. Leave empty to disable slippage checking.
+              retry with a smaller amount.
             </AlertDescription>
           </Alert>
 
@@ -291,18 +245,14 @@ export function PurchaseAndPositionSection() {
                     </TooltipProvider>
                   </div>
                   <FormControl>
-                    <Input
-                      {...field}
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="100"
-                      placeholder="5.0"
-                      onChange={(e) => {
-                        const value = parseFloat(e.target.value);
-                        field.onChange(value ? value / 100 : undefined);
-                      }}
-                      value={field.value ? field.value * 100 : ''}
+                    {/*
+                     * Form stores maxPriceImpact as 0–1 (e.g. 0.05); user sees percentage (e.g. 5).
+                     * fallbackValue 5 (5%) restores default when cleared so the field cannot be left empty.
+                     */}
+                    <NumericInput
+                      value={field.value != null ? field.value * 100 : undefined}
+                      onChange={(v) => field.onChange(v != null ? v / 100 : undefined)}
+                      fallbackValue={5}
                     />
                   </FormControl>
                   <FormMessage />

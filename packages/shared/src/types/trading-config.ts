@@ -360,28 +360,69 @@ export interface TakeProfitConfig {
 }
 
 /**
+ * Auto trade (immediate re-entry) configuration
+ *
+ * When enabled, only tokens listed in `tokens` with `enabled: true` are
+ * auto-traded: when a position in one of those tokens closes, it is
+ * re-purchased immediately using the agent's standard position size.
+ */
+export interface AutoTradeTokenConfig {
+  /** Token mint address to track for auto-trade re-entry */
+  address: string;
+  /** Optional token symbol for UI display (resolved from data providers like DexScreener) */
+  symbol?: string;
+  /** Optional token image URL (resolved from DexScreener pair info) */
+  logoUrl?: string;
+  /** Per-token on/off control in the UI */
+  enabled: boolean;
+  /**
+   * Minimum market cap (USD) required for auto-trade actions on this token.
+   * Undefined means no lower bound.
+   */
+  marketCapMin?: number;
+  /**
+   * Maximum market cap (USD) allowed for auto-trade actions on this token.
+   * Undefined means no upper bound.
+   */
+  marketCapMax?: number;
+}
+
+/**
+ * Auto trade configuration for an agent.
+ */
+export interface AutoTradeConfig {
+  /** Whether auto-trade is on for this agent */
+  enabled: boolean;
+  /** Token list with per-token enable state and optional market-cap bounds */
+  tokens: AutoTradeTokenConfig[];
+}
+
+/**
  * Complete agent trading configuration
  */
 export interface AgentTradingConfig {
   /** Purchase limits */
   purchaseLimits: PurchaseLimits;
-  
+
   /** Signal configuration */
   signals: SignalConfig;
-  
+
   /** Stop loss configuration */
   stopLoss: StopLossConfig;
-  
+
   /** Position sizing configuration */
   positionCalculator: PositionCalculator;
-  
+
   /** Stale trade auto-close configuration */
   staleTrade: StaleTradeConfig;
-  
+
   /** DCA (Dollar Cost Averaging) configuration */
   dca: DCAConfig;
-  
+
   /** Take-profit configuration */
   takeProfit: TakeProfitConfig;
+
+  /** Auto trade: immediately re-buy when an enabled token position closes */
+  autoTrade?: AutoTradeConfig;
 }
 

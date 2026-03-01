@@ -83,12 +83,17 @@ export function useWebSocket(
     pingInterval = 30000,
   } = options;
 
-  const { data: session } = useSession();
+  const { data: session, update: updateSession } = useSession();
   const { solPrice } = useCurrency();
   const queryClient = useQueryClient();
   
   // Extract token value to use in dependency array (prevents re-runs when session object changes)
   const accessToken = session?.accessToken as string | undefined;
+
+  // Ref for the session update function so onclose handlers can trigger a token
+  // refresh without adding updateSession to connect()'s dependency array.
+  const updateSessionRef = useRef(updateSession);
+  updateSessionRef.current = updateSession;
 
   // State
   const [isConnected, setIsConnected] = useState(false);
@@ -560,6 +565,15 @@ export function useWebSocket(
           pingIntervalRef.current = null;
         }
 
+        // Request a session refresh so NextAuth can issue a fresh access token.
+        // Reconnect attempts below use the token captured in connect()'s closure,
+        // which may be expired. The refreshed accessToken triggers the auto-connect
+        // effect, which cancels stale timers and connects with the new token.
+        if (!isManualDisconnect.current && event.code !== 1000) {
+          log('[WebSocket] 🔄 Requesting session refresh for fresh token...');
+          updateSessionRef.current?.();
+        }
+
         // Auto-reconnect if not manually disconnected
         // Note: Positions are preserved during automatic disconnects (not cleared)
         // Use ref to get current value (avoids stale closure)
@@ -596,8 +610,10 @@ export function useWebSocket(
         }
       };
 
-      ws.onerror = (error) => {
-        logError('[WebSocket] ❌ Connection error:', error);
+      ws.onerror = () => {
+        // Browser WebSocket error events never contain useful details (security
+        // restriction). The actual close code/reason comes from the onclose event.
+        logWarn('[WebSocket] ⚠️ Connection error (see close event for details)');
         setConnectionError('WebSocket connection error');
         setIsConnecting(false);
       };
@@ -645,6 +661,12 @@ export function useWebSocket(
     }
 
     if (wsRef.current) {
+      // Remove handlers BEFORE closing to prevent stale error/close events
+      // from firing after intentional disconnect (e.g. Strict Mode unmount).
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onclose = null;
       if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
         wsRef.current.close(1000, 'Manual disconnect');
       }
@@ -676,60 +698,94 @@ export function useWebSocket(
     }, 1000);
   }, [disconnect, connect]);
 
-  // Auto-connect effect - simplified for better resilience
-  // Use accessToken directly instead of session?.accessToken to prevent re-runs when session object changes
+  // Unmount cleanup — close the WebSocket but preserve positions in state.
+  // Using disconnect(false) is intentional: on true unmount the state is garbage-collected,
+  // and on React Strict Mode's simulated unmount/remount the preserved positions avoid a
+  // visible flash of empty data while the new connection's initial_data arrives.
   useEffect(() => {
-    // Only run if we have the required data
+    return () => {
+      disconnect(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-connect effect — manages connection lifecycle when agentId or token changes.
+  // Handles initial connection, agent switches, and token refreshes.
+  useEffect(() => {
+    // Clear the manual-disconnect flag: this effect running means we want a connection.
+    // Prevents the unmount cleanup (which sets this flag via disconnect()) from blocking
+    // reconnection after React Strict Mode's simulated unmount/remount cycle.
+    isManualDisconnect.current = false;
+
     if (!autoConnect || !agentId || !accessToken) {
       return;
     }
 
-    // Store current values for comparison
     const currentAgentId = agentId;
     const currentToken = accessToken;
 
-    // Check if agentId or token actually changed (only if we had previous values)
-    // This prevents false positives when effect re-runs due to session refresh
     const agentIdChanged = lastAgentIdRef.current !== null && 
                           lastAgentIdRef.current !== currentAgentId;
     const tokenChanged = lastTokenRef.current !== null && 
                         lastTokenRef.current !== currentToken &&
-                        lastTokenRef.current !== ''; // Ignore empty string comparisons
+                        lastTokenRef.current !== '';
 
-    // Only disconnect if there's an ACTUAL change AND we have an active connection
-    // This prevents disconnecting when tab becomes visible and effect re-runs
-    // Also check that we're not manually disconnecting (prevents race conditions)
-    if ((agentIdChanged || tokenChanged) && wsRef.current && 
-        (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) &&
-        !isManualDisconnect.current) {
-      log('[WebSocket] 🔄 Agent ID or token changed, disconnecting old connection...', {
+    // When agent or token changes, cancel all pending timers and reconnect.
+    // Stale timers must be cleared even when wsRef.current is null — a dead
+    // connection can still have pending reconnect timeouts whose closures
+    // reference the old agentId/token, causing competing connections.
+    if (agentIdChanged || tokenChanged) {
+      log('[WebSocket] 🔄 Agent ID or token changed, performing full cleanup...', {
         agentIdChanged,
         tokenChanged,
         oldAgentId: lastAgentIdRef.current,
         newAgentId: currentAgentId,
-        oldTokenLength: lastTokenRef.current?.length,
-        newTokenLength: currentToken?.length,
       });
-      setReconnectAttempts(0); // Reset attempts when agentId/token changes
-      disconnect(true); // Clear positions on agentId/token change
-      // Update refs
+
+      // 1. Cancel stale reconnect/reset timeouts FIRST — prevents old closures from firing
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (reconnectAttemptsResetTimeoutRef.current) {
+        clearTimeout(reconnectAttemptsResetTimeoutRef.current);
+        reconnectAttemptsResetTimeoutRef.current = null;
+      }
+
+      // 2. Reset all reconnect state
+      setReconnectAttempts(0);
+      reconnectAttemptsRef.current = 0;
+      setConnectionError(null);
+
+      // 3. Close active connection if one exists; otherwise clear stale data manually
+      if (wsRef.current && 
+          (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        disconnect(true);
+      } else {
+        setPositions([]);
+        positionsRef.current = [];
+        setLastUpdateTime(null);
+        setMessageCount(0);
+      }
+
+      // 4. Update refs
       lastAgentIdRef.current = currentAgentId;
       lastTokenRef.current = currentToken;
-      // Wait a bit before reconnecting with the new agent
-      setTimeout(() => {
-        // Use ref-based check — state values (isConnected/isConnecting) are stale in this closure
+
+      // 5. Reconnect with new agent/token after a short delay
+      const reconnectTimer = setTimeout(() => {
+        isManualDisconnect.current = false;
         if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
-          // Reset the manual disconnect flag so future onclose events can auto-reconnect
-          isManualDisconnect.current = false;
           log('[WebSocket] 🔌 Reconnecting with new agent/token...');
           connect();
         }
-      }, 500);
-      return;
+      }, 300);
+
+      return () => clearTimeout(reconnectTimer);
     }
 
-    // Update refs BEFORE connecting (so cleanup can compare)
-    // Only update if values actually changed to prevent unnecessary updates
+    // --- No change: initial connection or retry after max attempts ---
+
     if (lastAgentIdRef.current !== currentAgentId) {
       lastAgentIdRef.current = currentAgentId;
     }
@@ -737,69 +793,21 @@ export function useWebSocket(
       lastTokenRef.current = currentToken;
     }
 
-    // Reset reconnect attempts if we're trying to connect and max attempts were reached
-    // This allows retry even after max attempts
     if (reconnectAttempts >= maxReconnectAttempts && !isConnected && !isConnecting && !wsRef.current) {
       log('[WebSocket] 🔄 Resetting reconnect attempts to allow retry');
       setReconnectAttempts(0);
+      reconnectAttemptsRef.current = 0;
       setConnectionError(null);
     }
 
-    // Only connect if not already connected/connecting and no existing connection
-    // Also check that we're not in the middle of a disconnect/reconnect cycle
     if (!isConnected && !isConnecting && !wsRef.current && !isManualDisconnect.current) {
       log('[WebSocket] 🔌 Auto-connecting...');
       connect();
     } else if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-      // Connection is active - don't do anything, just log for debugging
       log('[WebSocket] ✅ Connection already active, skipping auto-connect');
     }
-
-    // Cleanup: only disconnect if agentId or token actually changed
-    // CRITICAL: Do NOT disconnect if connection is active and values haven't changed
-    // This prevents disconnections when tab becomes visible and effect re-runs
-    return () => {
-      // Get current values from closure
-      const currentAgentIdOnCleanup = agentId;
-      const currentTokenOnCleanup = accessToken;
-      
-      // Only disconnect if:
-      // 1. We have a connection
-      // 2. Values actually changed (not just effect re-run)
-      // 3. Connection is open/connecting
-      // 4. We're not already manually disconnecting
-      const agentIdActuallyChanged = lastAgentIdRef.current !== null && 
-                                    currentAgentIdOnCleanup !== null &&
-                                    currentAgentIdOnCleanup !== lastAgentIdRef.current;
-      const tokenActuallyChanged = lastTokenRef.current !== null && 
-                                  currentTokenOnCleanup !== undefined &&
-                                  currentTokenOnCleanup !== '' &&
-                                  currentTokenOnCleanup !== lastTokenRef.current;
-      
-      // CRITICAL: Don't disconnect if values are the same - this prevents false disconnects
-      // when tab becomes visible and session refreshes but token value is unchanged
-      if (
-        wsRef.current && 
-        (agentIdActuallyChanged || tokenActuallyChanged) &&
-        (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) &&
-        !isManualDisconnect.current
-      ) {
-        log('[WebSocket] 🧹 Cleanup: disconnecting due to dependency change...', {
-          agentIdActuallyChanged,
-          tokenActuallyChanged,
-          oldAgentId: lastAgentIdRef.current,
-          newAgentId: currentAgentIdOnCleanup,
-          oldTokenPreview: lastTokenRef.current?.substring(0, 10),
-          newTokenPreview: currentTokenOnCleanup?.substring(0, 10),
-        });
-        disconnect(true); // Clear positions on cleanup
-      } else if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-        // Connection is active and values haven't changed - don't disconnect
-        log('[WebSocket] 🧹 Cleanup: skipping disconnect - connection active and values unchanged');
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, accessToken]); // Only depend on agentId and token value, not session object
+  }, [agentId, accessToken]);
 
   return {
     // Connection state
