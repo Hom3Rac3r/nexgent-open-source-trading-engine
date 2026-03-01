@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { MINIMUM_POSITION_SIZE_SOL } from '../constants/trading-config-defaults.js';
 
 /**
  * Trailing level validation schema
@@ -81,16 +82,17 @@ export const purchaseLimitsSchema = z.object({
 });
 
 /**
- * Position size range validation schema
+ * Position size range validation schema.
+ * Enforces a hard floor of MINIMUM_POSITION_SIZE_SOL to prevent dust-sized trades.
  */
 export const positionSizeRangeSchema = z.object({
   min: z.number()
-    .nonnegative('Minimum position size must be >= 0'),
+    .min(MINIMUM_POSITION_SIZE_SOL, `Minimum purchase size is ${MINIMUM_POSITION_SIZE_SOL} SOL`),
   max: z.number()
-    .nonnegative('Maximum position size must be >= 0'),
+    .min(MINIMUM_POSITION_SIZE_SOL, `Minimum purchase size is ${MINIMUM_POSITION_SIZE_SOL} SOL`),
 }).refine(
   (data) => data.min <= data.max,
-  { message: 'Minimum position size must be <= maximum position size' }
+  { message: 'Max must be greater than or equal to min', path: ['max'] }
 );
 
 /**
