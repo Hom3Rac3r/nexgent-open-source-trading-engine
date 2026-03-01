@@ -16,6 +16,7 @@ import { positionService } from '../trading/position-service.js';
 import { stopLossManager } from '../trading/stop-loss-manager.service.js';
 import { takeProfitManager } from '../trading/take-profit-manager.service.js';
 import { dcaManager } from '../trading/dca-manager.service.js';
+import { evaluateAutoTradeMarketCapGuard } from '../trading/auto-trade-market-cap-guard.js';
 import { tradingExecutor } from '../trading/trading-executor.service.js';
 import { configService } from '../trading/config-service.js';
 import { prisma } from '@/infrastructure/database/client.js';
@@ -65,6 +66,11 @@ class PriceUpdateManager {
   // Cache prices to avoid unnecessary API calls
   // Note: Now we use Redis primarily, but keep local cache for very fast access
   private priceCache: Map<string, CachedPrice> = new Map(); // tokenAddress -> cached price
+
+  // In-memory cache for market-cap guard rejections to avoid repeated external API calls.
+  // Key: tokenAddress (normalized), Value: rejection expiry timestamp (ms).
+  private readonly MARKET_CAP_GUARD_TTL_MS = 60_000; // 60 seconds
+  private marketCapGuardRejectCache: Map<string, number> = new Map();
 
   // Reference to WebSocket server (set during initialization)
   private wsServer: {
@@ -965,6 +971,53 @@ class PriceUpdateManager {
       }, 'DCA evaluation result');
 
       if (evaluation.shouldTrigger && evaluation.triggerLevel && evaluation.buyAmountSol) {
+        // Pre-check 0: Enforce per-token auto-trade market-cap bounds for DCA actions.
+        // DCA is gated by the same market-cap policy as re-entry/reconciliation so that
+        // cost-averaging stops when a token moves outside the configured range.
+        const normalizedTokenAddr = evalPosition.tokenAddress.trim().toLowerCase();
+        const autoTradeTokenConfig = config.autoTrade?.tokens?.find(
+          (t) => t.enabled && t.address.trim().toLowerCase() === normalizedTokenAddr
+        );
+
+        // Check in-memory cache first to avoid repeated external Jupiter API calls
+        // when market-cap guard already rejected this token recently.
+        const cachedExpiry = this.marketCapGuardRejectCache.get(normalizedTokenAddr);
+        if (cachedExpiry && Date.now() < cachedExpiry) {
+          logger.debug({
+            positionId: evalPosition.id,
+            tokenSymbol: evalPosition.tokenSymbol,
+            dcaCount: evalPosition.dcaCount,
+          }, 'DCA skipped: market-cap guard rejection cached');
+          return;
+        }
+
+        const marketCapGuard = await evaluateAutoTradeMarketCapGuard({
+          tokenAddress: evalPosition.tokenAddress,
+          tokenBounds: autoTradeTokenConfig,
+        });
+        if (!marketCapGuard.allowed) {
+          this.marketCapGuardRejectCache.set(
+            normalizedTokenAddr,
+            Date.now() + this.MARKET_CAP_GUARD_TTL_MS
+          );
+
+          logger.info({
+            positionId: evalPosition.id,
+            agentId: evalPosition.agentId,
+            tokenAddress: evalPosition.tokenAddress,
+            tokenSymbol: evalPosition.tokenSymbol,
+            dcaCount: evalPosition.dcaCount,
+            reason: marketCapGuard.reason,
+            marketCap: marketCapGuard.marketCap,
+            marketCapMin: autoTradeTokenConfig?.marketCapMin ?? null,
+            marketCapMax: autoTradeTokenConfig?.marketCapMax ?? null,
+          }, 'DCA skipped: auto-trade market-cap policy');
+          return;
+        }
+
+        // Market cap is now in range — clear any cached rejection
+        this.marketCapGuardRejectCache.delete(normalizedTokenAddr);
+
         // Pre-check 1: Check if DCA is suspended for this position (failed recently)
         // This prevents repeated Jupiter API calls when we know it will fail
         const dcaSuspendKey = `dca_suspend:${evalPosition.id}`;
@@ -996,12 +1049,40 @@ class PriceUpdateManager {
 
         // Pre-check 3: Check SOL balance before attempting DCA buy
         // This prevents unnecessary Jupiter API calls when balance is insufficient
-        const solBalance = await redisBalanceService.getBalance(
+        let solBalance = await redisBalanceService.getBalance(
           evalPosition.agentId,
           evalPosition.walletAddress,
           this.SOL_TOKEN_ADDRESS
         );
-        const solBalanceNum = solBalance ? parseFloat(solBalance.balance) : 0;
+        let solBalanceNum = solBalance ? parseFloat(solBalance.balance) : 0;
+
+        // Fallback: if Redis has no/zero SOL balance (e.g. sim deposit updated DB but cache missed, or Redis was flushed), load from DB and repopulate cache
+        if (solBalanceNum <= 0) {
+          const dbBalance = await prisma.agentBalance.findUnique({
+            where: {
+              walletAddress_tokenAddress: {
+                walletAddress: evalPosition.walletAddress,
+                tokenAddress: this.SOL_TOKEN_ADDRESS,
+              },
+            },
+          });
+          if (dbBalance) {
+            const dbSol = parseFloat(dbBalance.balance.toString());
+            if (dbSol > 0) {
+              solBalanceNum = dbSol;
+              await redisBalanceService.setBalance({
+                id: dbBalance.id,
+                agentId: dbBalance.agentId,
+                walletAddress: dbBalance.walletAddress,
+                tokenAddress: dbBalance.tokenAddress,
+                tokenSymbol: dbBalance.tokenSymbol,
+                balance: dbBalance.balance.toString(),
+                lastUpdated: dbBalance.lastUpdated,
+              });
+              logger.debug({ positionId: evalPosition.id, walletAddress: evalPosition.walletAddress, solBalance: dbSol }, 'DCA: repopulated SOL balance from DB into cache');
+            }
+          }
+        }
 
         if (solBalanceNum < evaluation.buyAmountSol) {
           logger.warn({

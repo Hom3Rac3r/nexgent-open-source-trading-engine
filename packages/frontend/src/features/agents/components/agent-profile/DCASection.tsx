@@ -9,7 +9,7 @@ import {
   FormMessage,
   FormDescription,
 } from '@/shared/components/ui/form';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   Tooltip,
   TooltipContent,
@@ -37,7 +37,6 @@ export function DCASection() {
   const form = useFormContext<AgentTradingConfigFormValues>();
   const dcaEnabled = form.watch('dca.enabled');
   const dcaMode = (form.watch('dca.mode') || 'moderate') as DCAMode;
-  const cooldownSeconds = form.watch('dca.cooldownSeconds') ?? 30;
   const customLevels = form.watch('dca.levels') || [];
 
   return (
@@ -105,16 +104,11 @@ export function DCASection() {
                 </TooltipProvider>
               </div>
               <FormControl>
-                <Input
-                  {...field}
-                  type="number"
-                  step="10"
-                  min="10"
-                  max="3600"
-                  placeholder="30"
-                  className="max-w-[120px]"
-                  onChange={(e) => field.onChange(parseInt(e.target.value) || 30)}
+                <NumericInput
                   value={field.value}
+                  onChange={(v) => field.onChange(v)}
+                  inputMode="numeric"
+                  className="max-w-[120px]"
                   disabled={!dcaEnabled}
                 />
               </FormControl>

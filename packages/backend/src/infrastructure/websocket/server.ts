@@ -172,7 +172,7 @@ class WSServer {
 
       ws.on('close', (code, reason) => {
         console.log(`[WebSocket] Connection closed for agent ${agentId}: code=${code}, reason=${reason.toString()}`);
-        this.handleDisconnection(agentId);
+        this.handleDisconnection(agentId, ws);
       });
 
       ws.on('error', (error) => {
@@ -245,11 +245,17 @@ class WSServer {
   }
 
   /**
-   * Handle WebSocket disconnection
+   * Handle WebSocket disconnection.
+   * Only removes the connection from the map if the disconnecting socket is still
+   * the one stored — prevents a stale close event from an old socket from removing
+   * a newer replacement connection for the same agent.
    */
-  private handleDisconnection(agentId: string): void {
-    this.connections.delete(agentId);
-    console.log(`🔌 WebSocket disconnected: agent ${agentId}`);
+  private handleDisconnection(agentId: string, ws: WebSocket): void {
+    const current = this.connections.get(agentId);
+    if (current && current.ws === ws) {
+      this.connections.delete(agentId);
+      console.log(`🔌 WebSocket disconnected: agent ${agentId}`);
+    }
   }
 
   /**

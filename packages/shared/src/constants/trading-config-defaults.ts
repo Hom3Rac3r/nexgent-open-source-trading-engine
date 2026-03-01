@@ -6,7 +6,7 @@
  * configuration is reset.
  */
 
-import type { AgentTradingConfig, DCAConfig, SignalConfig, TakeProfitConfig } from '../types/trading-config.js';
+import type { AgentTradingConfig, AutoTradeConfig, DCAConfig, SignalConfig, TakeProfitConfig } from '../types/trading-config.js';
 
 /**
  * Common signal types for dropdown selection
@@ -84,6 +84,17 @@ export const DEFAULT_TAKE_PROFIT_CONFIG: TakeProfitConfig = {
 };
 
 /**
+ * Default auto-trade configuration
+ *
+ * When enabled, only tokens in tokens[] with enabled=true are re-purchased
+ * after position close.
+ */
+export const DEFAULT_AUTO_TRADE_CONFIG: AutoTradeConfig = {
+  enabled: false,
+  tokens: [],
+};
+
+/**
  * Default trading configuration
  * 
  * Based on production values from the original hardcoded configuration.
@@ -133,5 +144,6 @@ export const DEFAULT_TRADING_CONFIG: AgentTradingConfig = {
   },
   dca: DEFAULT_DCA_CONFIG,
   takeProfit: DEFAULT_TAKE_PROFIT_CONFIG,
+  autoTrade: DEFAULT_AUTO_TRADE_CONFIG,
 };
 

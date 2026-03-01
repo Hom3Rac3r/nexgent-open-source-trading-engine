@@ -13,7 +13,7 @@ import { Info, Shield, ShieldOff, BarChart3 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Separator } from '@/shared/components/ui/separator';
 import { Label } from '@/shared/components/ui/label';
-import { Input } from '@/shared/components/ui/input';
+import { FormattedNumberInput } from '@/shared/components/ui/formatted-number-input';
 import { useFormContext } from 'react-hook-form';
 import { TokenListEditor } from './TokenListEditor';
 import type { AgentTradingConfigFormValues } from './trading-config-form-schema';
@@ -147,17 +147,10 @@ export function RiskManagementSection() {
                   <FormItem className="min-w-0">
                     <FormLabel>Min Market Cap (USD)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min={0}
+                      <FormattedNumberInput
+                        value={field.value}
+                        onChange={field.onChange}
                         placeholder="No minimum"
-                        {...field}
-                        value={field.value != null ? String(field.value) : ''}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v = typeof raw === 'string' ? raw.trim() : raw;
-                          field.onChange(v === '' ? undefined : Number(v));
-                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -171,17 +164,10 @@ export function RiskManagementSection() {
                   <FormItem className="min-w-0">
                     <FormLabel>Max Market Cap (USD)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min={0}
+                      <FormattedNumberInput
+                        value={field.value}
+                        onChange={field.onChange}
                         placeholder="No maximum"
-                        {...field}
-                        value={field.value != null ? String(field.value) : ''}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v = typeof raw === 'string' ? raw.trim() : raw;
-                          field.onChange(v === '' ? undefined : Number(v));
-                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -198,17 +184,10 @@ export function RiskManagementSection() {
                   <FormItem className="min-w-0">
                     <FormLabel>Min Liquidity (USD)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min={0}
+                      <FormattedNumberInput
+                        value={field.value}
+                        onChange={field.onChange}
                         placeholder="No minimum"
-                        {...field}
-                        value={field.value != null ? String(field.value) : ''}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v = typeof raw === 'string' ? raw.trim() : raw;
-                          field.onChange(v === '' ? undefined : Number(v));
-                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -222,17 +201,10 @@ export function RiskManagementSection() {
                   <FormItem className="min-w-0">
                     <FormLabel>Max Liquidity (USD)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min={0}
+                      <FormattedNumberInput
+                        value={field.value}
+                        onChange={field.onChange}
                         placeholder="No maximum"
-                        {...field}
-                        value={field.value != null ? String(field.value) : ''}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v = typeof raw === 'string' ? raw.trim() : raw;
-                          field.onChange(v === '' ? undefined : Number(v));
-                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -249,18 +221,10 @@ export function RiskManagementSection() {
                   <FormItem className="min-w-0">
                     <FormLabel>Min Holder Count</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1}
+                      <FormattedNumberInput
+                        value={field.value}
+                        onChange={field.onChange}
                         placeholder="No minimum"
-                        {...field}
-                        value={field.value != null ? String(field.value) : ''}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v = typeof raw === 'string' ? raw.trim() : raw;
-                          field.onChange(v === '' ? undefined : Number(v));
-                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -274,18 +238,10 @@ export function RiskManagementSection() {
                   <FormItem className="min-w-0">
                     <FormLabel>Max Holder Count</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min={0}
-                        step={1}
+                      <FormattedNumberInput
+                        value={field.value}
+                        onChange={field.onChange}
                         placeholder="No maximum"
-                        {...field}
-                        value={field.value != null ? String(field.value) : ''}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          const v = typeof raw === 'string' ? raw.trim() : raw;
-                          field.onChange(v === '' ? undefined : Number(v));
-                        }}
                       />
                     </FormControl>
                     <FormMessage />

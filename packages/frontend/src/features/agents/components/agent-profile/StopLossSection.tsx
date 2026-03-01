@@ -8,7 +8,7 @@ import {
   FormLabel,
   FormMessage,
 } from '@/shared/components/ui/form';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   Tooltip,
   TooltipContent,
@@ -103,16 +103,10 @@ export function StopLossSection() {
                 </TooltipProvider>
               </div>
               <FormControl>
-                <Input
-                  {...field}
-                  type="number"
-                  step="1"
-                  min="-100"
-                  max="0"
-                  placeholder="-32"
-                  className="max-w-[120px]"
-                  onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                <NumericInput
                   value={field.value}
+                  onChange={(v) => field.onChange(v)}
+                  className="max-w-[120px]"
                   disabled={!stopLossEnabled}
                 />
               </FormControl>

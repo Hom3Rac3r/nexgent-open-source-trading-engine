@@ -101,8 +101,7 @@ describe('DCAManager', () => {
 
         // Assert
         expect(result.shouldTrigger).toBe(false);
-        expect(result.reason).toContain('Max DCA count reached');
-        expect(result.reason).toContain('3/3');
+        expect(result.reason).toContain('All DCA levels used');
       });
 
       it('should return no trigger during cooldown period', async () => {
@@ -331,7 +330,7 @@ describe('DCAManager', () => {
 
         // Assert
         expect(result.shouldTrigger).toBe(false);
-        expect(result.reason).toContain('exhausted');
+        expect(result.reason).toContain('All DCA levels used');
       });
     });
 

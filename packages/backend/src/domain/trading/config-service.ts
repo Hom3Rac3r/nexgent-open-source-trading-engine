@@ -119,6 +119,53 @@ class ConfigService {
       }
     }
 
+    // Normalize auto-trade token list (including per-token market-cap bounds)
+    if (merged.autoTrade) {
+      const rawAutoTrade = merged.autoTrade as unknown as {
+        enabled?: boolean;
+        tokens?: Array<{
+          address?: string;
+          symbol?: string;
+          logoUrl?: string;
+          enabled?: boolean;
+          marketCapMin?: number | null;
+          marketCapMax?: number | null;
+        }>;
+      };
+
+      let normalizedTokens: Array<{
+        address: string;
+        symbol?: string;
+        logoUrl?: string;
+        enabled: boolean;
+        marketCapMin?: number;
+        marketCapMax?: number;
+      }> = [];
+
+      if (Array.isArray(rawAutoTrade.tokens)) {
+        normalizedTokens = rawAutoTrade.tokens.flatMap((token) => {
+          if (!token || typeof token.address !== 'string') return [];
+          const rawSymbol = token.symbol;
+          const symbol = typeof rawSymbol === 'string' ? rawSymbol.trim() : undefined;
+          const rawLogoUrl = token.logoUrl;
+          const logoUrl = typeof rawLogoUrl === 'string' ? rawLogoUrl.trim() : undefined;
+          return [{
+            address: token.address.trim(),
+            symbol: symbol && symbol.length > 0 ? symbol : undefined,
+            logoUrl: logoUrl && logoUrl.length > 0 ? logoUrl : undefined,
+            enabled: token.enabled === true,
+            marketCapMin: token.marketCapMin ?? undefined,
+            marketCapMax: token.marketCapMax ?? undefined,
+          }];
+        });
+      }
+
+      merged.autoTrade = {
+        enabled: rawAutoTrade.enabled ?? false,
+        tokens: normalizedTokens,
+      };
+    }
+
     // Type assertion is safe here because we validate after merging
     return merged;
   }
@@ -126,6 +173,10 @@ class ConfigService {
   /** Optional signal metric keys; null in payload means "clear" (backend normalizes to undefined for validation). */
   private static readonly OPTIONAL_SIGNAL_METRIC_KEYS = [
     'marketCapMin', 'marketCapMax', 'liquidityMin', 'liquidityMax', 'holderCountMin', 'holderCountMax',
+  ] as const;
+  /** Optional per-token auto-trade metric keys; null in payload means "clear" (normalize to undefined for validation). */
+  private static readonly OPTIONAL_AUTO_TRADE_TOKEN_METRIC_KEYS = [
+    'marketCapMin', 'marketCapMax',
   ] as const;
 
   /**
@@ -145,6 +196,7 @@ class ConfigService {
       partialConfig as Record<string, unknown>
     ) as unknown as AgentTradingConfig;
     this.normalizeOptionalSignalMetrics(merged);
+    this.normalizeOptionalAutoTradeMetrics(merged);
     return merged;
   }
 
@@ -157,6 +209,21 @@ class ConfigService {
     for (const key of ConfigService.OPTIONAL_SIGNAL_METRIC_KEYS) {
       if (signals[key] === null) {
         signals[key] = undefined;
+      }
+    }
+  }
+
+  /**
+   * Normalize optional per-token auto-trade metric fields: null → undefined so Zod optional() validation passes.
+   */
+  private normalizeOptionalAutoTradeMetrics(config: AgentTradingConfig): void {
+    if (!config.autoTrade?.tokens) return;
+    for (const token of config.autoTrade.tokens) {
+      const raw = token as unknown as Record<string, unknown>;
+      for (const key of ConfigService.OPTIONAL_AUTO_TRADE_TOKEN_METRIC_KEYS) {
+        if (raw[key] === null) {
+          raw[key] = undefined;
+        }
       }
     }
   }
@@ -232,7 +299,9 @@ class ConfigService {
 
     // Validate business logic
     if (errors.length === 0) {
-      const businessLogicResult = validateTradingConfigBusinessLogic(config as AgentTradingConfig);
+      const businessLogicResult = validateTradingConfigBusinessLogic(
+        config as unknown as Parameters<typeof validateTradingConfigBusinessLogic>[0]
+      );
       if (!businessLogicResult.valid) {
         errors.push(...businessLogicResult.errors);
       }

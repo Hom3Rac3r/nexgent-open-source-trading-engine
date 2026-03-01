@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useFieldArray, useFormContext } from 'react-hook-form';
 import { Button } from '@/shared/components/ui/button';
-import { Input } from '@/shared/components/ui/input';
+import { NumericInput } from '@/shared/components/ui/formatted-number-input';
 import {
   Table,
   TableBody,
@@ -158,29 +158,18 @@ export function TrailingLevelsEditor() {
                   </TableCell>
                   {/* Price Increase % - Inline Editable */}
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="1"
-                      min="0"
-                      placeholder="100"
-                      className="w-full"
-                      {...form.register(`stopLoss.trailingLevels.${index}.change`, {
-                        valueAsNumber: true,
-                      })}
-                      onChange={(e) => {
-                        const value = parseFloat(e.target.value) || 0;
+                    <NumericInput
+                      value={form.watch(`stopLoss.trailingLevels.${index}.change`)}
+                      onChange={(v) =>
                         form.setValue(
                           `stopLoss.trailingLevels.${index}.change`,
-                          value,
+                          v ?? 0,
                           { shouldValidate: true, shouldDirty: true }
-                        );
-                      }}
-                      onBlur={() => {
-                        // Sort on blur when user finishes editing
-                        sortLevels();
-                      }}
+                        )
+                      }
+                      onBlur={() => sortLevels()}
+                      className="w-full"
                       onDragStart={(e) => e.stopPropagation()}
-                      value={form.watch(`stopLoss.trailingLevels.${index}.change`)}
                     />
                     {form.formState.errors.stopLoss?.trailingLevels?.[index]?.change && (
                       <p className="text-xs text-destructive mt-1">
@@ -191,25 +180,17 @@ export function TrailingLevelsEditor() {
 
                   {/* Stop Loss % - Inline Editable */}
                   <TableCell>
-                    <Input
-                      type="number"
-                      step="1"
-                      min="0"
-                      placeholder="60"
-                      className="w-full"
-                      {...form.register(`stopLoss.trailingLevels.${index}.stopLoss`, {
-                        valueAsNumber: true,
-                      })}
-                      onChange={(e) => {
-                        const value = parseFloat(e.target.value) || 0;
+                    <NumericInput
+                      value={form.watch(`stopLoss.trailingLevels.${index}.stopLoss`)}
+                      onChange={(v) =>
                         form.setValue(
                           `stopLoss.trailingLevels.${index}.stopLoss`,
-                          value,
+                          v ?? 0,
                           { shouldValidate: true, shouldDirty: true }
-                        );
-                      }}
+                        )
+                      }
+                      className="w-full"
                       onDragStart={(e) => e.stopPropagation()}
-                      value={form.watch(`stopLoss.trailingLevels.${index}.stopLoss`)}
                     />
                     {form.formState.errors.stopLoss?.trailingLevels?.[index]?.stopLoss && (
                       <p className="text-xs text-destructive mt-1">
