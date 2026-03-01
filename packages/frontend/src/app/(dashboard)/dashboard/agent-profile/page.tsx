@@ -101,7 +101,7 @@ export default function AgentProfilePage() {
       <ProfileSection agent={agent} />
 
       {/* Strategy Section - Below profile */}
-      {tradingConfig && <StrategySection agentId={agent.id} initialConfig={tradingConfig} />}
+      {tradingConfig && <StrategySection agentId={agent.id} agentName={agent.name} initialConfig={tradingConfig} />}
       
       {!tradingConfig && !isLoadingConfig && (
         <Alert>

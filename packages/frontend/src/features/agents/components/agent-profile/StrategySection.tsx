@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Form } from '@/shared/components/ui/form';
 import { Button } from '@/shared/components/ui/button';
-import { AlertCircle, Check } from 'lucide-react';
+import { AlertCircle, Check, Download, FolderInput } from 'lucide-react';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useUpdateAgentTradingConfig } from '@/features/agents';
 import { useUnsavedChanges } from '@/features/agents/contexts/unsaved-changes.context';
@@ -23,6 +23,8 @@ import { TakeProfitSection } from './TakeProfitSection';
 import { SignalsSection } from './SignalsSection';
 import { RiskManagementSection } from './RiskManagementSection';
 import { AutoTradeSection } from './AutoTradeSection';
+import { LoadFromAgentDialog } from './LoadFromAgentDialog';
+import { downloadTradingConfigJson } from '../../utils/trading-config-export';
 import type { AgentTradingConfig } from '@nexgent/shared';
 
 /** Optional signal metric keys; undefined means "no bound". We send null when cleared so the backend receives the key and can clear the value. */
@@ -125,6 +127,7 @@ function prepareTradingConfigPayload(values: AgentTradingConfigFormValues): Part
 
 interface StrategySectionProps {
   agentId: string;
+  agentName: string;
   initialConfig: AgentTradingConfig;
 }
 
@@ -136,12 +139,13 @@ const FORM_ID = 'strategy';
  * Contains the trading configuration form with tabs for different sections.
  * Uses explicit Save button; registers with UnsavedChangesContext for navigation guard.
  */
-export function StrategySection({ agentId, initialConfig }: StrategySectionProps) {
+export function StrategySection({ agentId, agentName, initialConfig }: StrategySectionProps) {
   const { toast } = useToast();
   const updateConfigMutation = useUpdateAgentTradingConfig();
   const unsavedContext = useUnsavedChanges();
   const [activeTab, setActiveTab] = React.useState('purchase');
   const [saveStatus, setSaveStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [loadDialogOpen, setLoadDialogOpen] = React.useState(false);
   const lastSavedJson = React.useRef<string>(JSON.stringify(initialConfig));
 
   const form = useForm<AgentTradingConfigFormValues>({
@@ -214,6 +218,14 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
     }
   };
 
+  const handleExportConfig = () => {
+    downloadTradingConfigJson(initialConfig, agentName);
+  };
+
+  const handleLoadFromAgent = (config: AgentTradingConfig) => {
+    form.reset(normalizeConfigForForm(config));
+  };
+
   // Tab configuration
   const tabOptions = [
     { value: 'purchase', label: 'Purchase & Position' },
@@ -242,6 +254,14 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
             </CardDescription>
           </div>
           <div className="flex items-center gap-3">
+            <Button size="sm" variant="outline" onClick={handleExportConfig} title="Export config to JSON">
+              <Download className="h-4 w-4 mr-1" />
+              Export
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setLoadDialogOpen(true)} title="Load config from another agent">
+              <FolderInput className="h-4 w-4 mr-1" />
+              Load from Agent
+            </Button>
             {canSave && (
               <Button size="sm" onClick={handleSave} disabled={isSaving}>
                 {saveStatus === 'saving' && <LoadingSpinner size="sm" className="mr-1" />}
@@ -327,6 +347,14 @@ export function StrategySection({ agentId, initialConfig }: StrategySectionProps
           </form>
         </Form>
       </CardContent>
+
+      <LoadFromAgentDialog
+        open={loadDialogOpen}
+        onOpenChange={setLoadDialogOpen}
+        currentAgentId={agentId}
+        onLoadConfig={handleLoadFromAgent}
+        hasUnsavedChanges={isDirty}
+      />
     </Card>
   );
 }
