@@ -22,6 +22,13 @@ import {
 } from '@/shared/components/ui/form';
 import { Input } from '@/shared/components/ui/input';
 import { Button } from '@/shared/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/components/ui/select';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useCreateAgent, useUpdateAgentTradingConfig } from '@/features/agents';
 import { useAgentSelection } from '@/shared/contexts/agent-selection.context';
@@ -30,8 +37,11 @@ import { StrategyExplanation } from '@/features/agents/components/agent-profile/
 import { Separator } from '@/shared/components/ui/separator';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import type { StopLossMode } from '@nexgent/shared';
-import { GripVertical, TrendingUp, Layers, Settings, Info } from 'lucide-react';
+import { GripVertical, TrendingUp, Layers, Settings, Info, FolderInput } from 'lucide-react';
 import { cn } from '@/shared/utils/cn';
+import { useUser } from '@/shared/contexts/user.context';
+import { useAgents } from '@/features/agents';
+import { AgentsService } from '@/infrastructure/api/services/agents.service';
 
 const createAgentSchema = z.object({
   name: z
@@ -39,9 +49,13 @@ const createAgentSchema = z.object({
     .min(1, 'Agent name is required')
     .max(255, 'Agent name must be less than 255 characters'),
   stopLossMode: z.enum(['fixed', 'exponential', 'zones', 'custom']),
+  /** When set, the new agent copies the full trading config from this agent. */
+  sourceAgentId: z.string().optional(),
 });
 
 type CreateAgentFormValues = z.infer<typeof createAgentSchema>;
+
+const agentsService = new AgentsService();
 
 interface CreateAgentDialogProps {
   open: boolean;
@@ -53,6 +67,8 @@ export function CreateAgentDialog({
 }: CreateAgentDialogProps) {
   const router = useRouter();
   const { toast } = useToast();
+  const { user } = useUser();
+  const { data: agents } = useAgents(user?.id);
   const createAgentMutation = useCreateAgent();
   const updateConfigMutation = useUpdateAgentTradingConfig();
   const { selectAgent } = useAgentSelection();
@@ -63,10 +79,12 @@ export function CreateAgentDialog({
     defaultValues: {
       name: '',
       stopLossMode: 'fixed',
+      sourceAgentId: undefined,
     },
   });
 
   const stopLossMode = form.watch('stopLossMode') as StopLossMode;
+  const sourceAgentId = form.watch('sourceAgentId');
 
   const onSubmit = async (data: CreateAgentFormValues) => {
     try {
@@ -74,62 +92,62 @@ export function CreateAgentDialog({
         name: data.name,
       });
 
-      // Save the stop loss configuration
+      // Apply trading config: either copy from source agent or just set stop loss mode
       try {
-        interface StopLossConfigInput {
-          enabled: boolean;
-          defaultPercentage: number;
-          mode: StopLossMode;
-          trailingLevels: Array<{ change: number; stopLoss: number }>;
-        }
-        
-        const stopLossConfig: StopLossConfigInput = {
-          enabled: true,
-          defaultPercentage: -32,
-          mode: data.stopLossMode,
-          trailingLevels: [],
-        };
+        if (data.sourceAgentId) {
+          const sourceConfig = await agentsService.getTradingConfig(data.sourceAgentId);
+          await updateConfigMutation.mutateAsync({
+            agentId: newAgent.id,
+            data: sourceConfig,
+          });
+        } else {
+          interface StopLossConfigInput {
+            enabled: boolean;
+            defaultPercentage: number;
+            mode: StopLossMode;
+            trailingLevels: Array<{ change: number; stopLoss: number }>;
+          }
 
-        // If custom mode, initialize with default trailing levels
-        if (data.stopLossMode === 'custom') {
-          stopLossConfig.trailingLevels = [
-            { change: 200, stopLoss: 90 },
-            { change: 150, stopLoss: 80 },
-            { change: 100, stopLoss: 60 },
-            { change: 50, stopLoss: 20 },
-            { change: 20, stopLoss: 10 },
-          ];
-        }
+          const stopLossConfig: StopLossConfigInput = {
+            enabled: true,
+            defaultPercentage: -32,
+            mode: data.stopLossMode,
+            trailingLevels: [],
+          };
 
-        await updateConfigMutation.mutateAsync({
-          agentId: newAgent.id,
-          data: {
-            stopLoss: stopLossConfig,
-          },
-        });
+          if (data.stopLossMode === 'custom') {
+            stopLossConfig.trailingLevels = [
+              { change: 200, stopLoss: 90 },
+              { change: 150, stopLoss: 80 },
+              { change: 100, stopLoss: 60 },
+              { change: 50, stopLoss: 20 },
+              { change: 20, stopLoss: 10 },
+            ];
+          }
+
+          await updateConfigMutation.mutateAsync({
+            agentId: newAgent.id,
+            data: { stopLoss: stopLossConfig },
+          });
+        }
       } catch (configError) {
-        // Log error but don't fail the agent creation
-        console.error('Failed to save stop loss config:', configError);
+        console.error('Failed to save trading config:', configError);
         toast({
           variant: 'destructive',
           title: 'Warning',
-          description: 'Agent created but failed to save stop loss settings. You can configure them later.',
+          description: 'Agent created but failed to apply trading settings. You can configure them later.',
         });
       }
 
-      // Select the newly created agent
       selectAgent(newAgent.id);
 
-      // Reset form
       form.reset({
         name: '',
         stopLossMode: 'fixed',
+        sourceAgentId: undefined,
       });
 
-      // Close dialog
       onOpenChange(false);
-
-      // Show transition
       setShowTransition(true);
     } catch (error) {
       toast({
@@ -147,6 +165,7 @@ export function CreateAgentDialog({
     form.reset({
       name: '',
       stopLossMode: 'fixed',
+      sourceAgentId: undefined,
     });
     onOpenChange(false);
   };
@@ -197,7 +216,52 @@ export function CreateAgentDialog({
 
             <Separator />
 
-            {/* Stop Loss Section */}
+            {/* Load from existing agent */}
+            {agents && agents.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <FolderInput className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold">Copy Settings from Agent</h3>
+                  <span className="text-xs text-muted-foreground">(optional)</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Start with the full trading configuration from an existing agent.
+                </p>
+                <FormField
+                  control={form.control}
+                  name="sourceAgentId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Select
+                          value={field.value ?? 'none'}
+                          onValueChange={(value) => field.onChange(value === 'none' ? undefined : value)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Start from scratch" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Start from scratch</SelectItem>
+                            {agents.map((agent) => (
+                              <SelectItem key={agent.id} value={agent.id}>
+                                {agent.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            )}
+
+            {/* Stop Loss Section — hidden when copying from another agent */}
+            {!sourceAgentId && (
+            <>
+            <Separator />
+
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold">Stop Loss Strategy</h3>
@@ -307,6 +371,17 @@ export function CreateAgentDialog({
                 Don't worry - you can always change these stop loss settings later in your agent's profile.
               </AlertDescription>
             </Alert>
+            </>
+            )}
+
+            {sourceAgentId && (
+              <Alert className="bg-muted/50">
+                <FolderInput className="h-4 w-4" />
+                <AlertDescription className="text-sm">
+                  The full trading configuration (stop loss, position sizing, DCA, take-profit, etc.) will be copied from <strong>{agents?.find(a => a.id === sourceAgentId)?.name}</strong>. You can customise everything after creation.
+                </AlertDescription>
+              </Alert>
+            )}
 
             <div className="flex justify-end space-x-2">
               <Button
