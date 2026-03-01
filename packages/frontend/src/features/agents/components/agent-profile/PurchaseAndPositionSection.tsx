@@ -137,7 +137,8 @@ function CategoryRow({
   rangeLabel: string;
 }) {
   const { errors } = form.formState;
-  const sizeErrorMessage = errors.positionCalculator?.positionSizes?.[category]?.message;
+  const categoryErrors = errors.positionCalculator?.positionSizes?.[category];
+  const sizeErrorMessage = categoryErrors?.message ?? categoryErrors?.root?.message;
 
   return (
     <div className="grid gap-4 md:grid-cols-3 border rounded-lg p-4 items-center">

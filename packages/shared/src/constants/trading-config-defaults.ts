@@ -8,6 +8,9 @@
 
 import type { AgentTradingConfig, AutoTradeConfig, DCAConfig, SignalConfig, TakeProfitConfig } from '../types/trading-config.js';
 
+/** Hard minimum position size in SOL — prevents dust-sized trades. */
+export const MINIMUM_POSITION_SIZE_SOL = 0.05;
+
 /**
  * Common signal types for dropdown selection
  * These are predefined options available in the UI
