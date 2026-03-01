@@ -1049,7 +1049,7 @@ class PriceUpdateManager {
 
         // Pre-check 3: Check SOL balance before attempting DCA buy
         // This prevents unnecessary Jupiter API calls when balance is insufficient
-        let solBalance = await redisBalanceService.getBalance(
+        const solBalance = await redisBalanceService.getBalance(
           evalPosition.agentId,
           evalPosition.walletAddress,
           this.SOL_TOKEN_ADDRESS
